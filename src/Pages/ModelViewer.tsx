@@ -5,27 +5,34 @@ import { OrbitControls, useGLTF, Environment, PerspectiveCamera } from '@react-t
 import { Plus, Minus, Maximize2, Bell, UserCircle, Heart, Brain } from 'lucide-react';
 import { LayoutDashboard, Target, FileText, Pill, TestTube2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+
 import { useSpring, animated } from '@react-spring/three';
 import { Group } from 'three';
-import { Vector3 } from 'three';
+
 
 
 interface ModelProps {
     opacity?: number;
     isZoomed: boolean;
   }
+  
+  interface SpringValues {
+    position: number[];
+    rotation: number[];
+  }
 
   function Model({ opacity = 1, isZoomed }: ModelProps) {
     const { scene } = useGLTF('/assets/demo-body-1.glb') as { scene: Group };
-    const springs = useSpring({
-      position: isZoomed ? [0, -1.5, 0] : [0, -1.1, 0],
-      rotation: isZoomed ? [0, Math.PI * 0.05, 0] : [0, 0, 0],
-      config: {
-        mass: 1,
-        tension: 170,
-        friction: 26,
-      },
-    });
+
+    const { position, rotation } = useSpring({
+        position: isZoomed ? [0, -1.5, 0] : [0, -1.1, 0],
+        rotation: isZoomed ? [0, Math.PI * 0.05, 0] : [0, 0, 0],
+        config: {
+          mass: 1,
+          tension: 170,
+          friction: 26,
+        },
+      });
   
   
     // Clone materials to avoid affecting other instances
@@ -58,13 +65,14 @@ interface ModelProps {
     }, [scene, opacity]);
   
     return (
-        <animated.primitive
-          object={scene}
-          scale={[0.09, 0.09, 0.09] as [number, number, number]}
-          position={springs.position as unknown as Vector3}
-          rotation={springs.rotation as unknown as Vector3}
-        />
-      );
+    <animated.primitive
+      object={scene}
+      scale={[0.09, 0.09, 0.09]}
+      position={position as unknown as THREE.Vector3}
+      rotation={rotation as unknown as THREE.Euler}
+    />
+  );
+
   }
 
 interface ActionCardProps {
