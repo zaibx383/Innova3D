@@ -1,4 +1,4 @@
-import React from 'react';
+
 import { Heart, Brain } from 'lucide-react';
 
 function FloatingButtons() {

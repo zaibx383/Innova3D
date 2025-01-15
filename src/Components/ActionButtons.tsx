@@ -1,4 +1,4 @@
-import React from 'react';
+
 import { Plus, Minus, Maximize2 } from 'lucide-react';
 
 interface ActionButtonsProps {

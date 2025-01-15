@@ -1,4 +1,4 @@
-import React from 'react';
+
 import { LayoutDashboard, Target, FileText, Pill, TestTube2, Bell, UserCircle } from 'lucide-react';
 
 function NavigationBar() {

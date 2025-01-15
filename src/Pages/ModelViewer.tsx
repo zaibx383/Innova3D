@@ -7,13 +7,15 @@ import { LayoutDashboard, Target, FileText, Pill, TestTube2 } from 'lucide-react
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSpring, animated } from '@react-spring/three';
 import { Group } from 'three';
+import { Vector3 } from 'three';
+
 
 interface ModelProps {
-  opacity?: number;
-  isZoomed: boolean;
-}
+    opacity?: number;
+    isZoomed: boolean;
+  }
 
-function Model({ opacity = 1, isZoomed }: ModelProps) {
+  function Model({ opacity = 1, isZoomed }: ModelProps) {
     const { scene } = useGLTF('/assets/demo-body-1.glb') as { scene: Group };
     const springs = useSpring({
       position: isZoomed ? [0, -1.5, 0] : [0, -1.1, 0],
@@ -24,6 +26,7 @@ function Model({ opacity = 1, isZoomed }: ModelProps) {
         friction: 26,
       },
     });
+  
   
     // Clone materials to avoid affecting other instances
     React.useEffect(() => {
@@ -55,13 +58,13 @@ function Model({ opacity = 1, isZoomed }: ModelProps) {
     }, [scene, opacity]);
   
     return (
-      <animated.primitive
-        object={scene}
-        scale={0.09}
-        position={springs.position}
-        rotation={springs.rotation}
-      />
-    );
+        <animated.primitive
+          object={scene}
+          scale={[0.09, 0.09, 0.09] as [number, number, number]}
+          position={springs.position as unknown as Vector3}
+          rotation={springs.rotation as unknown as Vector3}
+        />
+      );
   }
 
 interface ActionCardProps {
@@ -166,62 +169,60 @@ function RiskCard({ progress, onClick, isSelected }: RiskCardProps) {
 }
 
 export default function ModelViewer() {
-  const [progress, setProgress] = useState<number>(50);
-  const [modelOpacity, setModelOpacity] = useState<number>(1);
-  const [isZoomed, setIsZoomed] = useState<boolean>(false);
-  const cameraRef = useRef<THREE.PerspectiveCamera>(null);
-
-  const handleZoomToggle = () => {
-    setIsZoomed(!isZoomed);
-
-    if (cameraRef.current) {
-      const targetPosition = isZoomed ? [0, 0, 3] : [0, 0, 2];
-      const { position } = cameraRef.current;
-      const startPosition = [...position.toArray()] as [number, number, number];
-      const duration = 1500;
+    const [progress, setProgress] = useState<number>(50);
+    const [modelOpacity, setModelOpacity] = useState<number>(1);
+    const [isZoomed, setIsZoomed] = useState<boolean>(false);
+    const cameraRef = useRef<THREE.PerspectiveCamera>(null);
+  
+    const handleZoomToggle = () => {
+      setIsZoomed(!isZoomed);
+  
+      if (cameraRef.current) {
+        const { position } = cameraRef.current;
+        const duration = 1500;
+        const startTime = Date.now();
+  
+        const animate = () => {
+          const elapsed = Date.now() - startTime;
+          const progress = Math.min(elapsed / duration, 1);
+          const easeProgress = progress;
+  
+          const targetPos: [number, number, number] = isZoomed ? [0, 0, 3] : [0, 0, 2];
+          const startPos: [number, number, number] = [...position.toArray()] as [number, number, number];
+          
+          position.set(
+            startPos[0] + (targetPos[0] - startPos[0]) * easeProgress,
+            startPos[1] + (targetPos[1] - startPos[1]) * easeProgress,
+            startPos[2] + (targetPos[2] - startPos[2]) * easeProgress
+          );
+          if (progress < 1) {
+            requestAnimationFrame(animate);
+          }
+        };
+  
+        requestAnimationFrame(animate);
+      }
+  
+      const opacityTarget = isZoomed ? 1 : 0.5;
+      const startOpacity = modelOpacity;
       const startTime = Date.now();
-
-      const animate = () => {
+      const duration = 800;
+  
+      const animateOpacity = () => {
         const elapsed = Date.now() - startTime;
         const progress = Math.min(elapsed / duration, 1);
         const easeProgress = progress;
-
-        const targetPosition: [number, number, number] = isZoomed ? [0, 0, 3] : [0, 0, 2];
-        const startPosition: [number, number, number] = [...position.toArray()] as [number, number, number];
-        
-        position.set(
-          startPosition[0] + (targetPosition[0] - startPosition[0]) * easeProgress,
-          startPosition[1] + (targetPosition[1] - startPosition[1]) * easeProgress,
-          startPosition[2] + (targetPosition[2] - startPosition[2]) * easeProgress
-        );
+  
+        setModelOpacity(startOpacity + (opacityTarget - startOpacity) * easeProgress);
+  
         if (progress < 1) {
-          requestAnimationFrame(animate);
+          requestAnimationFrame(animateOpacity);
         }
       };
-
-      requestAnimationFrame(animate);
-    }
-
-    const opacityTarget = isZoomed ? 1 : 0.5;
-    const startOpacity = modelOpacity;
-    const startTime = Date.now();
-    const duration = 800;
-
-    const animateOpacity = () => {
-      const elapsed = Date.now() - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-      const easeProgress = progress;
-
-      setModelOpacity(startOpacity + (opacityTarget - startOpacity) * easeProgress);
-
-      if (progress < 1) {
-        requestAnimationFrame(animateOpacity);
-      }
+  
+      requestAnimationFrame(animateOpacity);
+      setProgress(isZoomed ? 50 : 100);
     };
-
-    requestAnimationFrame(animateOpacity);
-    setProgress(isZoomed ? 50 : 100);
-  };
 
   return (
     <div className="relative w-full h-screen rounded-2xl overflow-hidden bg-gray-100">
@@ -289,7 +290,7 @@ export default function ModelViewer() {
             <directionalLight position={[10, 10, 5]} intensity={0.8} />
             <directionalLight position={[-10, -10, -5]} intensity={0.1} />
             <pointLight position={[0, 5, 0]} intensity={0.2} />
-            <Environment preset="studio" intensity={0.4} />
+            <Environment preset="studio" />
             <Model opacity={modelOpacity} isZoomed={isZoomed} />
             <OrbitControls
               enableZoom={true} 
