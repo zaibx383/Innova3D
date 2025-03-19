@@ -43,16 +43,15 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
     rendererRef.current = renderer;
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    
+
     // Enhanced shadow settings
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     
-    // Casting to any because TS definitions might be missing these properties
     (renderer as any).outputColorSpace = THREE.SRGBColorSpace;
     (renderer as any).physicallyCorrectLights = true;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.2;
+    renderer.toneMappingExposure = 1.5; 
     container.appendChild(renderer.domElement);
 
     // --- Controls Setup ---
@@ -67,24 +66,20 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
     controls.zoomSpeed = 0.8;
 
     // --- Lighting Setup ---
-    // Ambient Light - reduce intensity to make shadows more prominent
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4); // Increased a bit to preserve model colors
-
+    // Reduce ambient light for greater contrast in shadows
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.3); 
     scene.add(ambientLight);
 
-    // Hemisphere Light - create a warm/cool contrast
+    // Hemisphere Light for subtle color contrast
     const hemiLight = new THREE.HemisphereLight(0xffd580, 0x80a0ff, 0.3);
     hemiLight.position.set(0, 50, 0);
     scene.add(hemiLight);
 
-    // Main Directional Light - simulating sun
-    const mainLight = new THREE.DirectionalLight(0xffffff, 1.0); // Changed to white light to preserve colors
-    // Fixed position to prevent flickering
+    // Main Directional Light with enhanced shadow settings
+    const mainLight = new THREE.DirectionalLight(0xffffff, 1.2); 
     mainLight.position.set(15, 20, 15);
     mainLight.castShadow = true;
-    
-    // Enhanced shadow settings
-    mainLight.shadow.mapSize.width = 4096; // High resolution shadows
+    mainLight.shadow.mapSize.width = 4096; 
     mainLight.shadow.mapSize.height = 4096;
     mainLight.shadow.camera.near = 0.5;
     mainLight.shadow.camera.far = 100;
@@ -92,38 +87,34 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
     mainLight.shadow.camera.right = 25;
     mainLight.shadow.camera.top = 25;
     mainLight.shadow.camera.bottom = -25;
-    mainLight.shadow.bias = -0.0005; // Adjusted to prevent shadow acne
-    mainLight.shadow.normalBias = 0.04; // Increased to help with shadow stability
-    mainLight.shadow.radius = 1.5; // Slight blur to stabilize shadows
-    
+    mainLight.shadow.bias = -0.0005;
+    mainLight.shadow.normalBias = 0.04; 
+    mainLight.shadow.radius = 3; 
+
     directionalLightRef.current = mainLight;
     scene.add(mainLight);
 
-    // Fill Light
-    const fillLight = new THREE.DirectionalLight(0xffffff, 0.3); // Changed to white to preserve colors
+    // Fill Light for overall illumination remains the same
+    const fillLight = new THREE.DirectionalLight(0xffffff, 0.4);
     fillLight.position.set(-15, 10, -15);
     scene.add(fillLight);
 
-    // --- Ground Plane for receiving shadows ---
+    // --- Ground Plane for Receiving Shadows ---
+    // Using ShadowMaterial with maximum opacity and explicit black color
     const groundGeometry = new THREE.PlaneGeometry(200, 200);
-    const groundMaterial = new THREE.MeshStandardMaterial({ 
-      color: 0xe0e0e0, 
-      roughness: 0.8,
-      metalness: 0.1,
-    });
+    const groundMaterial = new THREE.ShadowMaterial({ opacity: 1.0 });
+    groundMaterial.color = new THREE.Color(0x000000);
     const groundPlane = new THREE.Mesh(groundGeometry, groundMaterial);
-    groundPlane.rotation.x = -Math.PI / 2; // Rotate to be horizontal
-    groundPlane.position.y = -0.1; // Slightly below the model
+    groundPlane.rotation.x = -Math.PI / 2; 
+    groundPlane.position.y = -0.1; 
     groundPlane.receiveShadow = true;
     scene.add(groundPlane);
 
     // --- Model Loading ---
     const loader = new GLTFLoader();
-
-    // Variables for the intro animation
     let introAnimation = true;
     let animationStartTime = 0;
-    const animationDuration = 3000; // 3 seconds
+    const animationDuration = 3000; 
 
     loader.load(
       modelPath,
@@ -131,13 +122,11 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
         const model = gltf.scene;
         modelRef.current = model;
 
-        // Center model
+        // Center and scale model
         const box = new THREE.Box3().setFromObject(model);
         const center = new THREE.Vector3();
         box.getCenter(center);
         model.position.sub(center);
-
-        // Scale model
         const size = box.getSize(new THREE.Vector3()).length();
         const scale = 10 / size;
         model.scale.set(scale, scale, scale);
@@ -147,11 +136,8 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
             const mesh = child as THREE.Mesh;
             mesh.castShadow = true;
             mesh.receiveShadow = true;
-            
             if (Array.isArray(mesh.material)) {
-              // Cast the material array to the correct type
               const materials = mesh.material as THREE.Material[];
-              
               materials.forEach((mat, index) => {
                 if ((mat as THREE.MeshBasicMaterial).isMeshBasicMaterial) {
                   const basicMat = mat as THREE.MeshBasicMaterial;
@@ -166,8 +152,6 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
                   materials[index] = newMat;
                 }
               });
-              
-              // Assign the modified materials array back to the mesh
               mesh.material = materials;
             } else if ((mesh.material as THREE.MeshBasicMaterial).isMeshBasicMaterial) {
               const basicMat = mesh.material as THREE.MeshBasicMaterial;
@@ -186,22 +170,17 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
 
         scene.add(model);
 
-        // Camera positioning
+        // Position camera based on model bounding sphere
         const boundingBox = new THREE.Box3().setFromObject(model);
         const boundingSphere = new THREE.Sphere();
         boundingBox.getBoundingSphere(boundingSphere);
-
         controls.target.copy(boundingSphere.center);
-
-        // Set camera position for intro animation
         const radius = boundingSphere.radius;
         camera.position.set(
           boundingSphere.center.x - radius * 0.6,
           boundingSphere.center.y + radius * 0.3,
           boundingSphere.center.z + radius * 0.6
         );
-
-        // Store initial camera position for animation
         const initialCameraPosition = camera.position.clone();
         const targetCameraPosition = new THREE.Vector3(
           boundingSphere.center.x - radius * 0.8,
@@ -209,34 +188,24 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
           boundingSphere.center.z + radius * 1.2
         );
 
-        // Adjust the directional light and shadow camera based on the model size
         if (directionalLightRef.current) {
           const light = directionalLightRef.current;
-          // Fixed position to avoid flickering shadows
           const lightRadius = boundingSphere.radius * 2.5;
           light.position.set(
             boundingSphere.center.x + lightRadius,
             boundingSphere.center.y + radius * 1.5,
             boundingSphere.center.z + lightRadius
           );
-          
-          // Create a target object at the center of the model
           const targetObject = new THREE.Object3D();
           targetObject.position.copy(boundingSphere.center);
           scene.add(targetObject);
           light.target = targetObject;
-          
-          // Update the shadow camera to fit the model precisely
           const shadowCameraSize = radius * 2.5;
           light.shadow.camera.left = -shadowCameraSize;
           light.shadow.camera.right = shadowCameraSize;
           light.shadow.camera.top = shadowCameraSize;
           light.shadow.camera.bottom = -shadowCameraSize;
           light.shadow.camera.updateProjectionMatrix();
-          
-          // Optional: add shadow camera helper for debugging
-          // const shadowHelper = new THREE.CameraHelper(light.shadow.camera);
-          // scene.add(shadowHelper);
         }
 
         controls.update();
@@ -248,45 +217,29 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
         scene.environment = cubeRenderTarget.texture;
         pmremGenerator.dispose();
 
-        // Model is loaded, hide spinner
         setIsLoading(false);
-
-        // Start animation
         introAnimation = true;
         animationStartTime = Date.now();
 
-        // Animate function with model rotation and camera movement
         const animate = () => {
           requestAnimationFrame(animate);
           controls.update();
-          
-          // We're no longer rotating the light to prevent flickering
-          // The light stays in a fixed position
 
           if (introAnimation) {
             const elapsed = Date.now() - animationStartTime;
             const progress = Math.min(elapsed / animationDuration, 1);
-
-            // Smooth animation curve using easeOutCubic
             const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
             const easedProgress = easeOutCubic(progress);
-
-            // Rotate model
-            model.rotation.y = easedProgress * Math.PI * 0.25; // Rotate by 45 degrees
-
-            // Move camera
+            model.rotation.y = easedProgress * Math.PI * 0.25; 
             camera.position.lerpVectors(
               initialCameraPosition,
               targetCameraPosition,
               easedProgress
             );
-
             if (progress >= 1) {
               introAnimation = false;
-              // Enable controls after animation
               controls.enabled = true;
             } else {
-              // Disable controls during animation
               controls.enabled = false;
             }
           }
@@ -294,7 +247,6 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
           renderer.render(scene, camera);
         };
 
-        // Start the animation
         animate();
       },
       (xhr: ProgressEvent<EventTarget>) => {
@@ -304,18 +256,18 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
       },
       (error: any) => {
         console.error('Model loading error:', error);
-        setIsLoading(false); // Hide spinner even on error
+        setIsLoading(false);
       }
     );
 
-    // Grid Helper (now less prominent)
+    // Grid Helper
     const gridHelper = new THREE.GridHelper(30, 30, 0x555555, 0x444444);
-    gridHelper.position.y = -0.05; // Slightly above the ground plane
+    gridHelper.position.y = -0.05; 
     gridHelper.material.opacity = 0.5;
     gridHelper.material.transparent = true;
     scene.add(gridHelper);
 
-    // --- Basic Animation Loop (will be replaced when model is loaded) ---
+    // Basic Animation Loop (pre-model load)
     let frameId: number;
     const animatePreload = () => {
       frameId = requestAnimationFrame(animatePreload);
@@ -324,7 +276,7 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
     };
     animatePreload();
 
-    // --- Resize Handler ---
+    // Resize Handler
     const handleResize = () => {
       const width = container.clientWidth;
       const height = container.clientHeight;
@@ -334,27 +286,18 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
     };
     window.addEventListener('resize', handleResize);
 
-    // --- Cleanup ---
+    // Cleanup on unmount
     return () => {
       window.removeEventListener('resize', handleResize);
       cancelAnimationFrame(frameId);
-
-      // Dispose controls
-      if (controlsRef.current) {
-        controlsRef.current.dispose();
-      }
-
-      // Dispose renderer
+      if (controlsRef.current) controlsRef.current.dispose();
       if (rendererRef.current) {
         rendererRef.current.dispose();
         if (container.contains(rendererRef.current.domElement)) {
           container.removeChild(rendererRef.current.domElement);
         }
       }
-
-      // Dispose scene
       if (sceneRef.current) {
-        // Dispose materials and geometries
         sceneRef.current.traverse((child) => {
           if (child instanceof THREE.Mesh) {
             child.geometry?.dispose();
@@ -365,21 +308,13 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
             }
           }
         });
-
-        // Dispose environment
         if (sceneRef.current.environment) {
           (sceneRef.current.environment as any).dispose();
           sceneRef.current.environment = null;
         }
-
-        // Clear scene
         sceneRef.current.clear();
       }
-
-      // Clear model reference
-      if (modelRef.current) {
-        modelRef.current = null;
-      }
+      if (modelRef.current) modelRef.current = null;
     };
   }, [modelPath]);
 
@@ -407,7 +342,6 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
           boxShadow: '0 0 20px rgba(0,0,0,0.05)'
         }}
       />
-
       {isLoading && (
         <div
           style={{
@@ -433,16 +367,9 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
               marginBottom: '15px'
             }}
           />
-          <p
-            style={{
-              color: '#333',
-              fontSize: '16px',
-              fontWeight: 'bold'
-            }}
-          >
+          <p style={{ color: '#333', fontSize: '16px', fontWeight: 'bold' }}>
             Loading 3D Model...
           </p>
-
           <style>
             {`
               @keyframes spin {
