@@ -1,7 +1,7 @@
-import React, { useRef, useEffect, useState, FC } from 'react';
+import { useRef, useEffect, useState, FC } from 'react';
 import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
-import { GLTFLoader, GLTF } from 'three/examples/jsm/loaders/GLTFLoader';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { GLTFLoader, GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { PMREMGenerator } from 'three';
 
 interface ModelViewerProps {
@@ -45,7 +45,7 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     // Casting to any because TS definitions might be missing these properties
-    (renderer as any).outputEncoding = THREE.sRGBEncoding;
+    (renderer as any).outputColorSpace = THREE.SRGBColorSpace;
     (renderer as any).physicallyCorrectLights = true;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.2;
@@ -130,9 +130,11 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
             const mesh = child as THREE.Mesh;
             mesh.castShadow = true;
             mesh.receiveShadow = true;
-
+        
             if (Array.isArray(mesh.material)) {
-              mesh.material.forEach((mat, index) => {
+              // Explicitly type the material array
+              const materials = mesh.material as THREE.Material[];
+              materials.forEach((mat, index) => {
                 if ((mat as THREE.MeshBasicMaterial).isMeshBasicMaterial) {
                   const basicMat = mat as THREE.MeshBasicMaterial;
                   const newMat = new THREE.MeshStandardMaterial({
@@ -144,13 +146,16 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
                     metalness: 0.2,
                     envMapIntensity: 0.8
                   });
-                  mesh.material[index] = newMat;
+                  // Assign to the explicitly typed array
+                  materials[index] = newMat;
                 } else if ((mat as THREE.MeshStandardMaterial).isMeshStandardMaterial) {
                   const standardMat = mat as THREE.MeshStandardMaterial;
                   standardMat.roughness = Math.max(0.6, standardMat.roughness);
                   standardMat.metalness = Math.min(0.3, standardMat.metalness);
                 }
               });
+              // Reassign the entire materials array back to mesh.material
+              mesh.material = materials;
             } else {
               if ((mesh.material as THREE.MeshBasicMaterial).isMeshBasicMaterial) {
                 const basicMat = mesh.material as THREE.MeshBasicMaterial;
