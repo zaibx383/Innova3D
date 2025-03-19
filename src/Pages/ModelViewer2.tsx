@@ -14,6 +14,7 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
   const controlsRef = useRef<OrbitControls | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const modelRef = useRef<THREE.Group | null>(null);
+  const directionalLightRef = useRef<THREE.DirectionalLight | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -42,8 +43,11 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
     rendererRef.current = renderer;
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    
+    // Enhanced shadow settings
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    
     // Casting to any because TS definitions might be missing these properties
     (renderer as any).outputColorSpace = THREE.SRGBColorSpace;
     (renderer as any).physicallyCorrectLights = true;
@@ -52,7 +56,6 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
     container.appendChild(renderer.domElement);
 
     // --- Controls Setup ---
-    // If you encounter deep type instantiation issues, you can cast to any here:
     const controls = new OrbitControls(camera, renderer.domElement) as OrbitControls;
     controlsRef.current = controls;
     controls.enableDamping = true;
@@ -64,40 +67,55 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
     controls.zoomSpeed = 0.8;
 
     // --- Lighting Setup ---
-    // Ambient Light
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+    // Ambient Light - reduce intensity to make shadows more prominent
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4); // Increased a bit to preserve model colors
+
     scene.add(ambientLight);
 
-    // Hemisphere Light
-    const hemiLight = new THREE.HemisphereLight(0x98c3ff, 0x7c6b4e, 0.5);
+    // Hemisphere Light - create a warm/cool contrast
+    const hemiLight = new THREE.HemisphereLight(0xffd580, 0x80a0ff, 0.3);
     hemiLight.position.set(0, 50, 0);
     scene.add(hemiLight);
 
-    // Main Directional Light
-    const mainLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    mainLight.position.set(15, 25, 15);
+    // Main Directional Light - simulating sun
+    const mainLight = new THREE.DirectionalLight(0xffffff, 1.0); // Changed to white light to preserve colors
+    // Fixed position to prevent flickering
+    mainLight.position.set(15, 20, 15);
     mainLight.castShadow = true;
-    mainLight.shadow.mapSize.width = 2048;
-    mainLight.shadow.mapSize.height = 2048;
+    
+    // Enhanced shadow settings
+    mainLight.shadow.mapSize.width = 4096; // High resolution shadows
+    mainLight.shadow.mapSize.height = 4096;
     mainLight.shadow.camera.near = 0.5;
     mainLight.shadow.camera.far = 100;
-    mainLight.shadow.camera.left = -20;
-    mainLight.shadow.camera.right = 20;
-    mainLight.shadow.camera.top = 20;
-    mainLight.shadow.camera.bottom = -20;
-    mainLight.shadow.bias = -0.0005;
+    mainLight.shadow.camera.left = -25;
+    mainLight.shadow.camera.right = 25;
+    mainLight.shadow.camera.top = 25;
+    mainLight.shadow.camera.bottom = -25;
+    mainLight.shadow.bias = -0.0005; // Adjusted to prevent shadow acne
+    mainLight.shadow.normalBias = 0.04; // Increased to help with shadow stability
+    mainLight.shadow.radius = 1.5; // Slight blur to stabilize shadows
+    
+    directionalLightRef.current = mainLight;
     scene.add(mainLight);
 
     // Fill Light
-    const fillLight = new THREE.DirectionalLight(0xffffeb, 0.3);
+    const fillLight = new THREE.DirectionalLight(0xffffff, 0.3); // Changed to white to preserve colors
     fillLight.position.set(-15, 10, -15);
     scene.add(fillLight);
 
-    // Top Light
-    const topLight = new THREE.DirectionalLight(0xffffff, 0.3);
-    topLight.position.set(0, 30, 0);
-    topLight.castShadow = true;
-    scene.add(topLight);
+    // --- Ground Plane for receiving shadows ---
+    const groundGeometry = new THREE.PlaneGeometry(200, 200);
+    const groundMaterial = new THREE.MeshStandardMaterial({ 
+      color: 0xe0e0e0, 
+      roughness: 0.8,
+      metalness: 0.1,
+    });
+    const groundPlane = new THREE.Mesh(groundGeometry, groundMaterial);
+    groundPlane.rotation.x = -Math.PI / 2; // Rotate to be horizontal
+    groundPlane.position.y = -0.1; // Slightly below the model
+    groundPlane.receiveShadow = true;
+    scene.add(groundPlane);
 
     // --- Model Loading ---
     const loader = new GLTFLoader();
@@ -124,16 +142,16 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
         const scale = 10 / size;
         model.scale.set(scale, scale, scale);
 
-        // Material enhancements
         model.traverse((child: THREE.Object3D) => {
           if ((child as THREE.Mesh).isMesh) {
             const mesh = child as THREE.Mesh;
             mesh.castShadow = true;
             mesh.receiveShadow = true;
-        
+            
             if (Array.isArray(mesh.material)) {
-              // Explicitly type the material array
+              // Cast the material array to the correct type
               const materials = mesh.material as THREE.Material[];
+              
               materials.forEach((mat, index) => {
                 if ((mat as THREE.MeshBasicMaterial).isMeshBasicMaterial) {
                   const basicMat = mat as THREE.MeshBasicMaterial;
@@ -142,38 +160,26 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
                     map: basicMat.map,
                     transparent: basicMat.transparent,
                     opacity: basicMat.opacity,
-                    roughness: 0.7,
-                    metalness: 0.2,
-                    envMapIntensity: 0.8
+                    roughness: 0.5,
+                    metalness: 0.0
                   });
-                  // Assign to the explicitly typed array
                   materials[index] = newMat;
-                } else if ((mat as THREE.MeshStandardMaterial).isMeshStandardMaterial) {
-                  const standardMat = mat as THREE.MeshStandardMaterial;
-                  standardMat.roughness = Math.max(0.6, standardMat.roughness);
-                  standardMat.metalness = Math.min(0.3, standardMat.metalness);
                 }
               });
-              // Reassign the entire materials array back to mesh.material
+              
+              // Assign the modified materials array back to the mesh
               mesh.material = materials;
-            } else {
-              if ((mesh.material as THREE.MeshBasicMaterial).isMeshBasicMaterial) {
-                const basicMat = mesh.material as THREE.MeshBasicMaterial;
-                const newMat = new THREE.MeshStandardMaterial({
-                  color: basicMat.color,
-                  map: basicMat.map,
-                  transparent: basicMat.transparent,
-                  opacity: basicMat.opacity,
-                  roughness: 0.7,
-                  metalness: 0.2,
-                  envMapIntensity: 0.8
-                });
-                mesh.material = newMat;
-              } else if ((mesh.material as THREE.MeshStandardMaterial).isMeshStandardMaterial) {
-                const standardMat = mesh.material as THREE.MeshStandardMaterial;
-                standardMat.roughness = Math.max(0.6, standardMat.roughness);
-                standardMat.metalness = Math.min(0.3, standardMat.metalness);
-              }
+            } else if ((mesh.material as THREE.MeshBasicMaterial).isMeshBasicMaterial) {
+              const basicMat = mesh.material as THREE.MeshBasicMaterial;
+              const newMat = new THREE.MeshStandardMaterial({
+                color: basicMat.color,
+                map: basicMat.map,
+                transparent: basicMat.transparent,
+                opacity: basicMat.opacity,
+                roughness: 0.5,
+                metalness: 0.0
+              });
+              mesh.material = newMat;
             }
           }
         });
@@ -203,6 +209,36 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
           boundingSphere.center.z + radius * 1.2
         );
 
+        // Adjust the directional light and shadow camera based on the model size
+        if (directionalLightRef.current) {
+          const light = directionalLightRef.current;
+          // Fixed position to avoid flickering shadows
+          const lightRadius = boundingSphere.radius * 2.5;
+          light.position.set(
+            boundingSphere.center.x + lightRadius,
+            boundingSphere.center.y + radius * 1.5,
+            boundingSphere.center.z + lightRadius
+          );
+          
+          // Create a target object at the center of the model
+          const targetObject = new THREE.Object3D();
+          targetObject.position.copy(boundingSphere.center);
+          scene.add(targetObject);
+          light.target = targetObject;
+          
+          // Update the shadow camera to fit the model precisely
+          const shadowCameraSize = radius * 2.5;
+          light.shadow.camera.left = -shadowCameraSize;
+          light.shadow.camera.right = shadowCameraSize;
+          light.shadow.camera.top = shadowCameraSize;
+          light.shadow.camera.bottom = -shadowCameraSize;
+          light.shadow.camera.updateProjectionMatrix();
+          
+          // Optional: add shadow camera helper for debugging
+          // const shadowHelper = new THREE.CameraHelper(light.shadow.camera);
+          // scene.add(shadowHelper);
+        }
+
         controls.update();
 
         // Environment map
@@ -223,6 +259,9 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
         const animate = () => {
           requestAnimationFrame(animate);
           controls.update();
+          
+          // We're no longer rotating the light to prevent flickering
+          // The light stays in a fixed position
 
           if (introAnimation) {
             const elapsed = Date.now() - animationStartTime;
@@ -269,9 +308,11 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
       }
     );
 
-    // Grid Helper
-    const gridHelper = new THREE.GridHelper(30, 30, 0x777777, 0x555555);
-    gridHelper.position.y = -0.01;
+    // Grid Helper (now less prominent)
+    const gridHelper = new THREE.GridHelper(30, 30, 0x555555, 0x444444);
+    gridHelper.position.y = -0.05; // Slightly above the ground plane
+    gridHelper.material.opacity = 0.5;
+    gridHelper.material.transparent = true;
     scene.add(gridHelper);
 
     // --- Basic Animation Loop (will be replaced when model is loaded) ---
