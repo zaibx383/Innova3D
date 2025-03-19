@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState, FC } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
+import { GLTFLoader, GLTF } from 'three/examples/jsm/loaders/GLTFLoader';
 import { PMREMGenerator } from 'three';
 
 interface ModelViewerProps {
@@ -35,23 +35,25 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
     camera.position.set(5, 8, 15);
 
     // --- Renderer Setup ---
-    const renderer = new THREE.WebGLRenderer({ 
+    const renderer = new THREE.WebGLRenderer({
       antialias: true,
-      powerPreference: 'high-performance' 
+      powerPreference: 'high-performance'
     });
     rendererRef.current = renderer;
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    renderer.outputEncoding = THREE.sRGBEncoding;
-    renderer.physicallyCorrectLights = true;
+    // Casting to any because TS definitions might be missing these properties
+    (renderer as any).outputEncoding = THREE.sRGBEncoding;
+    (renderer as any).physicallyCorrectLights = true;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.2;
     container.appendChild(renderer.domElement);
 
     // --- Controls Setup ---
-    const controls = new OrbitControls(camera, renderer.domElement);
+    // If you encounter deep type instantiation issues, you can cast to any here:
+    const controls = new OrbitControls(camera, renderer.domElement) as OrbitControls;
     controlsRef.current = controls;
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
@@ -99,15 +101,15 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
 
     // --- Model Loading ---
     const loader = new GLTFLoader();
-    
+
     // Variables for the intro animation
     let introAnimation = true;
     let animationStartTime = 0;
     const animationDuration = 3000; // 3 seconds
-    
+
     loader.load(
       modelPath,
-      (gltf) => {
+      (gltf: GLTF) => {
         const model = gltf.scene;
         modelRef.current = model;
 
@@ -123,45 +125,49 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
         model.scale.set(scale, scale, scale);
 
         // Material enhancements
-        model.traverse((child) => {
-          if (child instanceof THREE.Mesh) {
-            const mesh = child;
+        model.traverse((child: THREE.Object3D) => {
+          if ((child as THREE.Mesh).isMesh) {
+            const mesh = child as THREE.Mesh;
             mesh.castShadow = true;
             mesh.receiveShadow = true;
 
             if (Array.isArray(mesh.material)) {
               mesh.material.forEach((mat, index) => {
-                if (mat instanceof THREE.MeshBasicMaterial) {
+                if ((mat as THREE.MeshBasicMaterial).isMeshBasicMaterial) {
+                  const basicMat = mat as THREE.MeshBasicMaterial;
                   const newMat = new THREE.MeshStandardMaterial({
-                    color: mat.color,
-                    map: mat.map,
-                    transparent: mat.transparent,
-                    opacity: mat.opacity,
+                    color: basicMat.color,
+                    map: basicMat.map,
+                    transparent: basicMat.transparent,
+                    opacity: basicMat.opacity,
                     roughness: 0.7,
                     metalness: 0.2,
                     envMapIntensity: 0.8
                   });
                   mesh.material[index] = newMat;
-                } else if (mat instanceof THREE.MeshStandardMaterial) {
-                  mat.roughness = Math.max(0.6, mat.roughness);
-                  mat.metalness = Math.min(0.3, mat.metalness);
+                } else if ((mat as THREE.MeshStandardMaterial).isMeshStandardMaterial) {
+                  const standardMat = mat as THREE.MeshStandardMaterial;
+                  standardMat.roughness = Math.max(0.6, standardMat.roughness);
+                  standardMat.metalness = Math.min(0.3, standardMat.metalness);
                 }
               });
             } else {
-              if (mesh.material instanceof THREE.MeshBasicMaterial) {
+              if ((mesh.material as THREE.MeshBasicMaterial).isMeshBasicMaterial) {
+                const basicMat = mesh.material as THREE.MeshBasicMaterial;
                 const newMat = new THREE.MeshStandardMaterial({
-                  color: mesh.material.color,
-                  map: mesh.material.map,
-                  transparent: mesh.material.transparent,
-                  opacity: mesh.material.opacity,
+                  color: basicMat.color,
+                  map: basicMat.map,
+                  transparent: basicMat.transparent,
+                  opacity: basicMat.opacity,
                   roughness: 0.7,
                   metalness: 0.2,
                   envMapIntensity: 0.8
                 });
                 mesh.material = newMat;
-              } else if (mesh.material instanceof THREE.MeshStandardMaterial) {
-                mesh.material.roughness = Math.max(0.6, mesh.material.roughness);
-                mesh.material.metalness = Math.min(0.3, mesh.material.metalness);
+              } else if ((mesh.material as THREE.MeshStandardMaterial).isMeshStandardMaterial) {
+                const standardMat = mesh.material as THREE.MeshStandardMaterial;
+                standardMat.roughness = Math.max(0.6, standardMat.roughness);
+                standardMat.metalness = Math.min(0.3, standardMat.metalness);
               }
             }
           }
@@ -175,7 +181,7 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
         boundingBox.getBoundingSphere(boundingSphere);
 
         controls.target.copy(boundingSphere.center);
-        
+
         // Set camera position for intro animation
         const radius = boundingSphere.radius;
         camera.position.set(
@@ -183,7 +189,7 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
           boundingSphere.center.y + radius * 0.3,
           boundingSphere.center.z + radius * 0.6
         );
-        
+
         // Store initial camera position for animation
         const initialCameraPosition = camera.position.clone();
         const targetCameraPosition = new THREE.Vector3(
@@ -191,7 +197,7 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
           boundingSphere.center.y + radius * 0.5,
           boundingSphere.center.z + radius * 1.2
         );
-        
+
         controls.update();
 
         // Environment map
@@ -200,39 +206,37 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
         const cubeRenderTarget = pmremGenerator.fromScene(new THREE.Scene());
         scene.environment = cubeRenderTarget.texture;
         pmremGenerator.dispose();
-        
+
         // Model is loaded, hide spinner
         setIsLoading(false);
-        
+
         // Start animation
         introAnimation = true;
         animationStartTime = Date.now();
-        
+
         // Animate function with model rotation and camera movement
         const animate = () => {
           requestAnimationFrame(animate);
           controls.update();
-          
+
           if (introAnimation) {
             const elapsed = Date.now() - animationStartTime;
             const progress = Math.min(elapsed / animationDuration, 1);
-            
+
             // Smooth animation curve using easeOutCubic
-            const easeOutCubic = (t: number): number => {
-              return 1 - Math.pow(1 - t, 3);
-            };
+            const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
             const easedProgress = easeOutCubic(progress);
-            
+
             // Rotate model
             model.rotation.y = easedProgress * Math.PI * 0.25; // Rotate by 45 degrees
-            
+
             // Move camera
             camera.position.lerpVectors(
               initialCameraPosition,
               targetCameraPosition,
               easedProgress
             );
-            
+
             if (progress >= 1) {
               introAnimation = false;
               // Enable controls after animation
@@ -242,15 +246,19 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
               controls.enabled = false;
             }
           }
-          
+
           renderer.render(scene, camera);
         };
-        
+
         // Start the animation
         animate();
       },
-      (xhr) => console.log(`${(xhr.loaded / xhr.total) * 100}% loaded`),
-      (error) => {
+      (xhr: ProgressEvent<EventTarget>) => {
+        if (xhr.total) {
+          console.log(`${(xhr.loaded / xhr.total) * 100}% loaded`);
+        }
+      },
+      (error: any) => {
         console.error('Model loading error:', error);
         setIsLoading(false); // Hide spinner even on error
       }
@@ -305,7 +313,7 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
           if (child instanceof THREE.Mesh) {
             child.geometry?.dispose();
             if (Array.isArray(child.material)) {
-              child.material.forEach(material => material.dispose());
+              child.material.forEach((material) => material.dispose());
             } else {
               child.material?.dispose();
             }
@@ -314,7 +322,7 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
 
         // Dispose environment
         if (sceneRef.current.environment) {
-          sceneRef.current.environment.dispose();
+          (sceneRef.current.environment as any).dispose();
           sceneRef.current.environment = null;
         }
 
@@ -353,35 +361,42 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
           boxShadow: '0 0 20px rgba(0,0,0,0.05)'
         }}
       />
-      
+
       {isLoading && (
-        <div style={{
-          position: 'absolute',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          zIndex: 10
-        }}>
-          <div className="spinner" style={{
-            width: '60px',
-            height: '60px',
-            border: '5px solid rgba(0, 0, 0, 0.1)',
-            borderTop: '5px solid #3498db',
-            borderRadius: '50%',
-            animation: 'spin 1s linear infinite',
-            marginBottom: '15px'
-          }}/>
-          <p style={{
-            color: '#333',
-            fontSize: '16px',
-            fontWeight: 'bold'
-          }}>
+        <div
+          style={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            zIndex: 10
+          }}
+        >
+          <div
+            className="spinner"
+            style={{
+              width: '60px',
+              height: '60px',
+              border: '5px solid rgba(0, 0, 0, 0.1)',
+              borderTop: '5px solid #3498db',
+              borderRadius: '50%',
+              animation: 'spin 1s linear infinite',
+              marginBottom: '15px'
+            }}
+          />
+          <p
+            style={{
+              color: '#333',
+              fontSize: '16px',
+              fontWeight: 'bold'
+            }}
+          >
             Loading 3D Model...
           </p>
-          
+
           <style>
             {`
               @keyframes spin {
