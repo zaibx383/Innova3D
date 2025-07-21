@@ -23,15 +23,131 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [hoveredMeshName, setHoveredMeshName] = useState<string | null>(null);
   const animationFrameRef = useRef<number | null>(null);
+  const mouseMoveListenerAttachedRef = useRef<boolean>(false);
   
   // Maps to store target meshes and their original materials
   const targetMeshesRef = useRef<Map<string, THREE.Mesh>>(new Map());
   const originalMaterialsRef = useRef<Map<string, THREE.Material | THREE.Material[]>>(new Map());
   const highlightMaterialRef = useRef<THREE.Material | null>(null);
+  const currentlyHighlightedMeshRef = useRef<THREE.Mesh | null>(null);
+  
+  // Improved function to extract the target number from mesh names
+  const getTargetNumber = (name: string): number | null => {
+    // First, try direct pattern match for names ending with _NUMBER
+    const endMatch = name.match(/_(\d+)$/);
+    if (endMatch && endMatch[1]) {
+      const num = parseInt(endMatch[1], 10);
+      if (num >= 1 && num <= 69) return num;
+    }
+    
+    // Try to match names like "Mesh6497_2" where 2 is the unit number
+    const complexMatch = name.match(/Mesh\d+_(\d+)/);
+    if (complexMatch && complexMatch[1]) {
+      const num = parseInt(complexMatch[1], 10);
+      if (num >= 1 && num <= 69) return num;
+    }
+    
+    // Try to match any number between 1-69 in the name
+    const anyNumberMatch = name.match(/\b([1-9]|[1-5][0-9]|6[0-9])\b/);
+    if (anyNumberMatch && anyNumberMatch[1]) {
+      const num = parseInt(anyNumberMatch[1], 10);
+      if (num >= 1 && num <= 69) return num;
+    }
+    
+    return null;
+  };
+  
+  // Function to check if this mesh is one of our target meshes (1-69)
+  const isTargetMesh = (name: string): boolean => {
+    const targetNum = getTargetNumber(name);
+    return targetNum !== null && targetNum >= 1 && targetNum <= 69;
+  };
+
+  // Function to handle raycasting and intersection checking
+  const checkIntersection = () => {
+    if (!cameraRef.current || targetMeshesRef.current.size === 0) return;
+    
+    // Update the raycaster
+    raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current);
+    
+    // Get all target meshes
+    const targetMeshes = Array.from(targetMeshesRef.current.values());
+    
+    // Perform the raycasting
+    const intersects = raycasterRef.current.intersectObjects(targetMeshes, false);
+    
+    // Reset the currently highlighted mesh if it exists
+    if (currentlyHighlightedMeshRef.current) {
+      const originalMaterial = originalMaterialsRef.current.get(currentlyHighlightedMeshRef.current.uuid);
+      if (originalMaterial) {
+        currentlyHighlightedMeshRef.current.material = originalMaterial;
+      }
+      currentlyHighlightedMeshRef.current = null;
+      setHoveredMeshName(null);
+    }
+    
+    // Highlight the new mesh if there's an intersection
+    if (intersects.length > 0) {
+      // Check for undefined intersects[0]
+      const firstIntersect = intersects[0];
+      if (firstIntersect && firstIntersect.object) {
+        const mesh = firstIntersect.object as THREE.Mesh;
+        currentlyHighlightedMeshRef.current = mesh;
+        
+        // Extract the unit number to display
+        const targetNum = getTargetNumber(mesh.name);
+        if (targetNum !== null) {
+          setHoveredMeshName(targetNum.toString());
+        } else {
+          setHoveredMeshName(mesh.name);
+        }
+        
+        // Apply the highlight material
+        if (highlightMaterialRef.current) {
+          // Store the original material if not already stored
+          if (!originalMaterialsRef.current.has(mesh.uuid)) {
+            originalMaterialsRef.current.set(mesh.uuid, mesh.material);
+          }
+          
+          // Apply highlight material
+          mesh.material = highlightMaterialRef.current;
+        }
+      }
+    }
+  };
+
+  // Setup mouse event handling - moved outside the useEffect for better reuse
+  const setupMouseEvents = () => {
+    const container = containerRef.current;
+    if (!container || mouseMoveListenerAttachedRef.current) return;
+    
+    const onMouseMove = (event: MouseEvent) => {
+      // Calculate mouse position in normalized device coordinates
+      const rect = container.getBoundingClientRect();
+      mouseRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      mouseRef.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    };
+    
+    // Add mouse move event listener
+    container.addEventListener('mousemove', onMouseMove);
+    mouseMoveListenerAttachedRef.current = true;
+    
+    // Return cleanup function
+    return () => {
+      container.removeEventListener('mousemove', onMouseMove);
+      mouseMoveListenerAttachedRef.current = false;
+    };
+  };
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+
+    // --- Clear any previous state ---
+    targetMeshesRef.current.clear();
+    originalMaterialsRef.current.clear();
+    currentlyHighlightedMeshRef.current = null;
+    setHoveredMeshName(null);
 
     // --- Scene Setup ---
     const scene = new THREE.Scene();
@@ -130,6 +246,9 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
     
     highlightMaterialRef.current = highlightMaterial;
 
+    // Setup mouse events - returns a cleanup function
+    const cleanupMouseEvents = setupMouseEvents();
+
     // --- Model Loading ---
     const dracoLoader = new DRACOLoader();
     dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.5/');
@@ -151,39 +270,6 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
       }
     };
     loader.manager = loadManager;
-
-    // Improved function to extract the target number from mesh names
-    // This will handle various naming patterns that might be in your model
-    const getTargetNumber = (name: string): number | null => {
-      // First, try direct pattern match for names ending with _NUMBER
-      const endMatch = name.match(/_(\d+)$/);
-      if (endMatch && endMatch[1]) {
-        const num = parseInt(endMatch[1], 10);
-        if (num >= 1 && num <= 69) return num;
-      }
-      
-      // Try to match names like "Mesh6497_2" where 2 is the unit number
-      const complexMatch = name.match(/Mesh\d+_(\d+)/);
-      if (complexMatch && complexMatch[1]) {
-        const num = parseInt(complexMatch[1], 10);
-        if (num >= 1 && num <= 69) return num;
-      }
-      
-      // Try to match any number between 1-69 in the name
-      const anyNumberMatch = name.match(/\b([1-9]|[1-5][0-9]|6[0-9])\b/);
-      if (anyNumberMatch && anyNumberMatch[1]) {
-        const num = parseInt(anyNumberMatch[1], 10);
-        if (num >= 1 && num <= 69) return num;
-      }
-      
-      return null;
-    };
-    
-    // Function to check if this mesh is one of our target meshes (1-69)
-    const isTargetMesh = (name: string): boolean => {
-      const targetNum = getTargetNumber(name);
-      return targetNum !== null && targetNum >= 1 && targetNum <= 69;
-    };
     
     loader.load(
       modelPath,
@@ -215,12 +301,11 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
             
             // Check if this is one of our target meshes
             if (isTargetMesh(child.name)) {
-              const targetNum = getTargetNumber(child.name);
               // Store the mesh for raycasting
               targetMeshesRef.current.set(child.name, mesh);
               // Store the original material to restore it later
               originalMaterialsRef.current.set(child.uuid, mesh.material);
-              console.log(`Found target mesh: ${child.name} with target number: ${targetNum}`);
+              console.log(`Found target mesh: ${child.name} with target number: ${getTargetNumber(child.name)}`);
             }
             
             // Optimize geometry
@@ -242,10 +327,8 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
                     roughness: 0.7,
                     metalness: 0.0
                   });
-                  // Fix for TS error - check if mesh.material is an array
-                  if (Array.isArray(mesh.material)) {
-                    mesh.material[index] = newMat;
-                  }
+                  // Type assertion to make TypeScript happy
+                  (mesh.material as THREE.Material[])[index] = newMat;
                 }
               });
             } else if ((mesh.material as THREE.MeshBasicMaterial).isMeshBasicMaterial) {
@@ -353,8 +436,17 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
           }
 
           controls.update();
+          
+          // Perform raycasting on each frame to update highlighted mesh
+          checkIntersection();
+          
           renderer.render(scene, camera);
         };
+
+        // Cancel any existing animation frame
+        if (animationFrameRef.current !== null) {
+          cancelAnimationFrame(animationFrameRef.current);
+        }
 
         animate();
       },
@@ -388,72 +480,6 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
     
     animationFrameRef.current = requestAnimationFrame(animatePreload);
 
-    // --- Raycasting for Hover Detection ---
-    let currentlyHighlightedMesh: THREE.Mesh | null = null;
-
-    const onMouseMove = (event: MouseEvent) => {
-      // Calculate mouse position in normalized device coordinates
-      const rect = container.getBoundingClientRect();
-      mouseRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      mouseRef.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-      
-      // Perform the raycasting
-      checkIntersection();
-    };
-
-    const checkIntersection = () => {
-      if (!cameraRef.current || targetMeshesRef.current.size === 0) return;
-      
-      // Update the raycaster
-      raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current);
-      
-      // Get all target meshes
-      const targetMeshes = Array.from(targetMeshesRef.current.values());
-      
-      // Perform the raycasting
-      const intersects = raycasterRef.current.intersectObjects(targetMeshes, false);
-      
-      // Reset the currently highlighted mesh if it exists
-      if (currentlyHighlightedMesh) {
-        const originalMaterial = originalMaterialsRef.current.get(currentlyHighlightedMesh.uuid);
-        if (originalMaterial) {
-          currentlyHighlightedMesh.material = originalMaterial;
-        }
-        currentlyHighlightedMesh = null;
-        setHoveredMeshName(null);
-      }
-      
-      // Highlight the new mesh if there's an intersection
-      if (intersects.length > 0) {
-        const mesh = intersects[0]?.object as THREE.Mesh;
-        if (!mesh) return;
-        
-        currentlyHighlightedMesh = mesh;
-        
-        // Extract the unit number to display
-        const targetNum = getTargetNumber(mesh.name);
-        if (targetNum !== null) {
-          setHoveredMeshName(targetNum.toString());
-        } else {
-          setHoveredMeshName(mesh.name);
-        }
-        
-        // Apply the highlight material
-        if (highlightMaterialRef.current) {
-          // Store the original material if not already stored
-          if (!originalMaterialsRef.current.has(mesh.uuid)) {
-            originalMaterialsRef.current.set(mesh.uuid, mesh.material);
-          }
-          
-          // Apply highlight material
-          mesh.material = highlightMaterialRef.current;
-        }
-      }
-    };
-
-    // Add mouse move event listener
-    container.addEventListener('mousemove', onMouseMove);
-
     // Handle window resize
     const handleResize = () => {
       if (!container) return;
@@ -475,15 +501,28 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
 
     // Cleanup on unmount
     return () => {
+      // Call the mouse events cleanup function
+      if (cleanupMouseEvents) cleanupMouseEvents();
+      
       window.removeEventListener('resize', handleResize);
-      container.removeEventListener('mousemove', onMouseMove);
       
       if (animationFrameRef.current !== null) {
         cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
       }
       
       if (controlsRef.current) {
         controlsRef.current.dispose();
+        controlsRef.current = null;
+      }
+      
+      // Reset any highlighted mesh before cleanup
+      if (currentlyHighlightedMeshRef.current) {
+        const originalMaterial = originalMaterialsRef.current.get(currentlyHighlightedMeshRef.current.uuid);
+        if (originalMaterial) {
+          currentlyHighlightedMeshRef.current.material = originalMaterial;
+        }
+        currentlyHighlightedMeshRef.current = null;
       }
       
       if (rendererRef.current) {
@@ -492,6 +531,7 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
         if (container.contains(rendererRef.current.domElement)) {
           container.removeChild(rendererRef.current.domElement);
         }
+        rendererRef.current = null;
       }
       
       // Dispose of materials and geometries
@@ -520,21 +560,34 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
         }
         
         sceneRef.current.clear();
+        sceneRef.current = null;
       }
       
       // Dispose of highlight material
       if (highlightMaterialRef.current) {
         (highlightMaterialRef.current as THREE.Material).dispose();
+        highlightMaterialRef.current = null;
       }
       
       // Clear any other references
-      dracoLoader.dispose();
+      if (dracoLoader) dracoLoader.dispose();
       targetMeshesRef.current.clear();
       originalMaterialsRef.current.clear();
-      if (modelRef.current) modelRef.current = null;
+      modelRef.current = null;
       directionalLightRef.current = null;
+      cameraRef.current = null;
     };
   }, [modelPath]);
+
+  // Add an extra effect specifically for ensuring mouse events are attached
+  // This helps when component stays mounted but internal state changes
+  useEffect(() => {
+    // Setup mouse events
+    const cleanupMouseEvents = setupMouseEvents();
+    
+    // Cleanup function
+    return cleanupMouseEvents;
+  }, [isLoading]); // Re-run when loading state changes
 
   return (
     <div
@@ -628,7 +681,7 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
           zIndex: 10,
           pointerEvents: 'none'
         }}>
-          Selected: Unit {hoveredMeshName}
+       
         </div>
       )}
     </div>
