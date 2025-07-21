@@ -2,20 +2,32 @@ import { useRef, useEffect, useState, FC } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader, GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { PMREMGenerator } from 'three';
 
 interface ModelViewerProps {
   modelPath?: string;
 }
 
-const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) => {
+const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const modelRef = useRef<THREE.Group | null>(null);
   const directionalLightRef = useRef<THREE.DirectionalLight | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const raycasterRef = useRef(new THREE.Raycaster());
+  const mouseRef = useRef(new THREE.Vector2());
   const [isLoading, setIsLoading] = useState(true);
+  const [loadingProgress, setLoadingProgress] = useState(0);
+  const [hoveredMeshName, setHoveredMeshName] = useState<string | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  
+  // Maps to store target meshes and their original materials
+  const targetMeshesRef = useRef<Map<string, THREE.Mesh>>(new Map());
+  const originalMaterialsRef = useRef<Map<string, THREE.Material | THREE.Material[]>>(new Map());
+  const highlightMaterialRef = useRef<THREE.Material | null>(null);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -28,34 +40,36 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
 
     // --- Camera Setup ---
     const camera = new THREE.PerspectiveCamera(
-      40,
+      80,
       container.clientWidth / container.clientHeight,
       0.1,
       1000
     );
     camera.position.set(5, 8, 15);
+    cameraRef.current = camera;
 
-    // --- Renderer Setup ---
+    // --- Renderer Setup with optimized settings ---
     const renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      powerPreference: 'high-performance'
+      antialias: false,
+      powerPreference: 'high-performance',
+      precision: 'mediump'
     });
     rendererRef.current = renderer;
     renderer.setSize(container.clientWidth, container.clientHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-
-    // Enhanced shadow settings
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     
-    (renderer as any).outputColorSpace = THREE.SRGBColorSpace;
-    (renderer as any).physicallyCorrectLights = true;
+    const pixelRatio = Math.min(window.devicePixelRatio, 1.5);
+    renderer.setPixelRatio(pixelRatio);
+    
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
+    
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.5; 
+    renderer.toneMappingExposure = 1.5;
     container.appendChild(renderer.domElement);
 
     // --- Controls Setup ---
-    const controls = new OrbitControls(camera, renderer.domElement) as OrbitControls;
+    const controls = new OrbitControls(camera, renderer.domElement);
     controlsRef.current = controls;
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
@@ -64,23 +78,20 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
     controls.minDistance = 3.0;
     controls.maxDistance = 30.0;
     controls.zoomSpeed = 0.8;
+    controls.rotateSpeed = 0.7;
+    controls.enableZoom = true;
+    controls.update();
 
     // --- Lighting Setup ---
-    // Reduce ambient light for greater contrast in shadows
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.3); 
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     scene.add(ambientLight);
 
-    // Hemisphere Light for subtle color contrast
-    const hemiLight = new THREE.HemisphereLight(0xffd580, 0x80a0ff, 0.3);
-    hemiLight.position.set(0, 50, 0);
-    scene.add(hemiLight);
-
-    // Main Directional Light with enhanced shadow settings
-    const mainLight = new THREE.DirectionalLight(0xffffff, 1.2); 
+    const mainLight = new THREE.DirectionalLight(0xffffff, 1.0);
     mainLight.position.set(15, 20, 15);
     mainLight.castShadow = true;
-    mainLight.shadow.mapSize.width = 4096; 
-    mainLight.shadow.mapSize.height = 4096;
+    
+    mainLight.shadow.mapSize.width = 2048;
+    mainLight.shadow.mapSize.height = 2048;
     mainLight.shadow.camera.near = 0.5;
     mainLight.shadow.camera.far = 100;
     mainLight.shadow.camera.left = -25;
@@ -88,34 +99,92 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
     mainLight.shadow.camera.top = 25;
     mainLight.shadow.camera.bottom = -25;
     mainLight.shadow.bias = -0.0005;
-    mainLight.shadow.normalBias = 0.04; 
-    mainLight.shadow.radius = 3; 
-
+    
     directionalLightRef.current = mainLight;
     scene.add(mainLight);
 
-    // Fill Light for overall illumination remains the same
-    const fillLight = new THREE.DirectionalLight(0xffffff, 0.4);
+    const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
     fillLight.position.set(-15, 10, -15);
     scene.add(fillLight);
 
-    // --- Ground Plane for Receiving Shadows ---
-    // Using ShadowMaterial with maximum opacity and explicit black color
+    // --- Ground Plane ---
     const groundGeometry = new THREE.PlaneGeometry(200, 200);
-    const groundMaterial = new THREE.ShadowMaterial({ opacity: 1.0 });
+    const groundMaterial = new THREE.ShadowMaterial({ opacity: 0.8 });
     groundMaterial.color = new THREE.Color(0x000000);
     const groundPlane = new THREE.Mesh(groundGeometry, groundMaterial);
-    groundPlane.rotation.x = -Math.PI / 2; 
-    groundPlane.position.y = -0.1; 
+    groundPlane.rotation.x = -Math.PI / 2;
+    groundPlane.position.y = -0.1;
     groundPlane.receiveShadow = true;
     scene.add(groundPlane);
 
+    // --- Create highlight material ---
+    const highlightMaterial = new THREE.MeshStandardMaterial({
+      color: 0xFFECB3,         // soft pastel yellow
+      emissive: 0xFFD54F,      // warmer glow
+      emissiveIntensity: 0.5,
+      roughness: 0.5,
+      metalness: 0.8,
+      transparent: true,
+      opacity: 0.9
+    });
+    
+    highlightMaterialRef.current = highlightMaterial;
+
     // --- Model Loading ---
+    const dracoLoader = new DRACOLoader();
+    dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.5/');
+    dracoLoader.setDecoderConfig({ type: 'js' });
+
     const loader = new GLTFLoader();
+    loader.setDRACOLoader(dracoLoader);
+    
     let introAnimation = true;
     let animationStartTime = 0;
-    const animationDuration = 3000; 
+    const animationDuration = 2000;
 
+    // Load manager to track loading progress
+    const loadManager = new THREE.LoadingManager();
+    loadManager.onProgress = (url, loaded, total) => {
+      if (total > 0) {
+        const progress = Math.floor((loaded / total) * 100);
+        setLoadingProgress(progress);
+      }
+    };
+    loader.manager = loadManager;
+
+    // Improved function to extract the target number from mesh names
+    // This will handle various naming patterns that might be in your model
+    const getTargetNumber = (name: string): number | null => {
+      // First, try direct pattern match for names ending with _NUMBER
+      const endMatch = name.match(/_(\d+)$/);
+      if (endMatch && endMatch[1]) {
+        const num = parseInt(endMatch[1], 10);
+        if (num >= 1 && num <= 69) return num;
+      }
+      
+      // Try to match names like "Mesh6497_2" where 2 is the unit number
+      const complexMatch = name.match(/Mesh\d+_(\d+)/);
+      if (complexMatch && complexMatch[1]) {
+        const num = parseInt(complexMatch[1], 10);
+        if (num >= 1 && num <= 69) return num;
+      }
+      
+      // Try to match any number between 1-69 in the name
+      const anyNumberMatch = name.match(/\b([1-9]|[1-5][0-9]|6[0-9])\b/);
+      if (anyNumberMatch && anyNumberMatch[1]) {
+        const num = parseInt(anyNumberMatch[1], 10);
+        if (num >= 1 && num <= 69) return num;
+      }
+      
+      return null;
+    };
+    
+    // Function to check if this mesh is one of our target meshes (1-69)
+    const isTargetMesh = (name: string): boolean => {
+      const targetNum = getTargetNumber(name);
+      return targetNum !== null && targetNum >= 1 && targetNum <= 69;
+    };
+    
     loader.load(
       modelPath,
       (gltf: GLTF) => {
@@ -128,17 +197,41 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
         box.getCenter(center);
         model.position.sub(center);
         const size = box.getSize(new THREE.Vector3()).length();
-        const scale = 10 / size;
+        const baseScale = 10 / size;
+        const extraZoom = 1.5;
+        const scale = baseScale * extraZoom;
         model.scale.set(scale, scale, scale);
 
+        // Clear any previous maps
+        targetMeshesRef.current.clear();
+        originalMaterialsRef.current.clear();
+        
+        // Find and store all target meshes
         model.traverse((child: THREE.Object3D) => {
           if ((child as THREE.Mesh).isMesh) {
             const mesh = child as THREE.Mesh;
             mesh.castShadow = true;
             mesh.receiveShadow = true;
+            
+            // Check if this is one of our target meshes
+            if (isTargetMesh(child.name)) {
+              const targetNum = getTargetNumber(child.name);
+              // Store the mesh for raycasting
+              targetMeshesRef.current.set(child.name, mesh);
+              // Store the original material to restore it later
+              originalMaterialsRef.current.set(child.uuid, mesh.material);
+              console.log(`Found target mesh: ${child.name} with target number: ${targetNum}`);
+            }
+            
+            // Optimize geometry
+            if (mesh.geometry) {
+              mesh.geometry.computeBoundingBox();
+              mesh.geometry.computeBoundingSphere();
+            }
+            
+            // Convert materials to more performant versions
             if (Array.isArray(mesh.material)) {
-              const materials = mesh.material as THREE.Material[];
-              materials.forEach((mat, index) => {
+              mesh.material.forEach((mat, index) => {
                 if ((mat as THREE.MeshBasicMaterial).isMeshBasicMaterial) {
                   const basicMat = mat as THREE.MeshBasicMaterial;
                   const newMat = new THREE.MeshStandardMaterial({
@@ -146,13 +239,12 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
                     map: basicMat.map,
                     transparent: basicMat.transparent,
                     opacity: basicMat.opacity,
-                    roughness: 0.5,
+                    roughness: 0.7,
                     metalness: 0.0
                   });
-                  materials[index] = newMat;
+                  mesh.material[index] = newMat;
                 }
               });
-              mesh.material = materials;
             } else if ((mesh.material as THREE.MeshBasicMaterial).isMeshBasicMaterial) {
               const basicMat = mesh.material as THREE.MeshBasicMaterial;
               const newMat = new THREE.MeshStandardMaterial({
@@ -160,13 +252,19 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
                 map: basicMat.map,
                 transparent: basicMat.transparent,
                 opacity: basicMat.opacity,
-                roughness: 0.5,
+                roughness: 0.7,
                 metalness: 0.0
               });
               mesh.material = newMat;
             }
           }
         });
+
+        // Debug log - Print out all found target meshes
+        console.log(`Total target meshes found: ${targetMeshesRef.current.size}`);
+        if (targetMeshesRef.current.size === 0) {
+          console.warn("No target meshes found! Check mesh naming convention.");
+        }
 
         scene.add(model);
 
@@ -200,7 +298,9 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
           targetObject.position.copy(boundingSphere.center);
           scene.add(targetObject);
           light.target = targetObject;
-          const shadowCameraSize = radius * 2.5;
+          
+          // Adjust shadow camera to fit the model
+          const shadowCameraSize = radius * 2;
           light.shadow.camera.left = -shadowCameraSize;
           light.shadow.camera.right = shadowCameraSize;
           light.shadow.camera.top = shadowCameraSize;
@@ -210,7 +310,7 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
 
         controls.update();
 
-        // Environment map
+        // Simple environment map for reflection
         const pmremGenerator = new PMREMGenerator(renderer);
         pmremGenerator.compileEquirectangularShader();
         const cubeRenderTarget = pmremGenerator.fromScene(new THREE.Scene());
@@ -221,21 +321,26 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
         introAnimation = true;
         animationStartTime = Date.now();
 
+        // Animation loop
         const animate = () => {
-          requestAnimationFrame(animate);
-          controls.update();
-
+          animationFrameRef.current = requestAnimationFrame(animate);
+          
           if (introAnimation) {
             const elapsed = Date.now() - animationStartTime;
             const progress = Math.min(elapsed / animationDuration, 1);
             const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
             const easedProgress = easeOutCubic(progress);
-            model.rotation.y = easedProgress * Math.PI * 0.25; 
+            
+            if (model) {
+              model.rotation.y = easedProgress * Math.PI * 0.25;
+            }
+            
             camera.position.lerpVectors(
               initialCameraPosition,
               targetCameraPosition,
               easedProgress
             );
+            
             if (progress >= 1) {
               introAnimation = false;
               controls.enabled = true;
@@ -244,6 +349,7 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
             }
           }
 
+          controls.update();
           renderer.render(scene, camera);
         };
 
@@ -251,7 +357,8 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
       },
       (xhr: ProgressEvent<EventTarget>) => {
         if (xhr.total) {
-          console.log(`${(xhr.loaded / xhr.total) * 100}% loaded`);
+          const progress = Math.floor((xhr.loaded / xhr.total) * 100);
+          setLoadingProgress(progress);
         }
       },
       (error: any) => {
@@ -260,61 +367,167 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
       }
     );
 
-    // Grid Helper
-    const gridHelper = new THREE.GridHelper(30, 30, 0x555555, 0x444444);
-    gridHelper.position.y = -0.05; 
-    gridHelper.material.opacity = 0.5;
-    gridHelper.material.transparent = true;
-    scene.add(gridHelper);
-
     // Basic Animation Loop (pre-model load)
-    let frameId: number;
-    const animatePreload = () => {
-      frameId = requestAnimationFrame(animatePreload);
+    let lastFrameTime = 0;
+    const targetFPS = 30;
+    const frameInterval = 1000 / targetFPS;
+    
+    const animatePreload = (currentTime: number) => {
+      animationFrameRef.current = requestAnimationFrame(animatePreload);
+      
+      const deltaTime = currentTime - lastFrameTime;
+      if (deltaTime < frameInterval) return;
+      
+      lastFrameTime = currentTime - (deltaTime % frameInterval);
       controls.update();
       renderer.render(scene, camera);
     };
-    animatePreload();
+    
+    animationFrameRef.current = requestAnimationFrame(animatePreload);
 
-    // Resize Handler
+    // --- Raycasting for Hover Detection ---
+    let currentlyHighlightedMesh: THREE.Mesh | null = null;
+
+    const onMouseMove = (event: MouseEvent) => {
+      // Calculate mouse position in normalized device coordinates
+      const rect = container.getBoundingClientRect();
+      mouseRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      mouseRef.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      
+      // Perform the raycasting
+      checkIntersection();
+    };
+
+    const checkIntersection = () => {
+      if (!cameraRef.current || targetMeshesRef.current.size === 0) return;
+      
+      // Update the raycaster
+      raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current);
+      
+      // Get all target meshes
+      const targetMeshes = Array.from(targetMeshesRef.current.values());
+      
+      // Perform the raycasting
+      const intersects = raycasterRef.current.intersectObjects(targetMeshes, false);
+      
+      // Reset the currently highlighted mesh if it exists
+      if (currentlyHighlightedMesh) {
+        const originalMaterial = originalMaterialsRef.current.get(currentlyHighlightedMesh.uuid);
+        if (originalMaterial) {
+          currentlyHighlightedMesh.material = originalMaterial;
+        }
+        currentlyHighlightedMesh = null;
+        setHoveredMeshName(null);
+      }
+      
+      // Highlight the new mesh if there's an intersection
+      if (intersects.length > 0) {
+        const mesh = intersects[0].object as THREE.Mesh;
+        currentlyHighlightedMesh = mesh;
+        
+        // Extract the unit number to display
+        const targetNum = getTargetNumber(mesh.name);
+        if (targetNum !== null) {
+          setHoveredMeshName(targetNum.toString());
+        } else {
+          setHoveredMeshName(mesh.name);
+        }
+        
+        // Apply the highlight material
+        if (highlightMaterialRef.current) {
+          // Store the original material if not already stored
+          if (!originalMaterialsRef.current.has(mesh.uuid)) {
+            originalMaterialsRef.current.set(mesh.uuid, mesh.material);
+          }
+          
+          // Apply highlight material
+          mesh.material = highlightMaterialRef.current;
+        }
+      }
+    };
+
+    // Add mouse move event listener
+    container.addEventListener('mousemove', onMouseMove);
+
+    // Handle window resize
     const handleResize = () => {
+      if (!container) return;
+      
       const width = container.clientWidth;
       const height = container.clientHeight;
-      camera.aspect = width / height;
-      camera.updateProjectionMatrix();
-      renderer.setSize(width, height);
+      
+      if (cameraRef.current) {
+        cameraRef.current.aspect = width / height;
+        cameraRef.current.updateProjectionMatrix();
+      }
+      
+      if (rendererRef.current) {
+        rendererRef.current.setSize(width, height);
+      }
     };
+    
     window.addEventListener('resize', handleResize);
 
     // Cleanup on unmount
     return () => {
       window.removeEventListener('resize', handleResize);
-      cancelAnimationFrame(frameId);
-      if (controlsRef.current) controlsRef.current.dispose();
+      container.removeEventListener('mousemove', onMouseMove);
+      
+      if (animationFrameRef.current !== null) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+      
+      if (controlsRef.current) {
+        controlsRef.current.dispose();
+      }
+      
       if (rendererRef.current) {
         rendererRef.current.dispose();
+        rendererRef.current.forceContextLoss();
         if (container.contains(rendererRef.current.domElement)) {
           container.removeChild(rendererRef.current.domElement);
         }
       }
+      
+      // Dispose of materials and geometries
       if (sceneRef.current) {
         sceneRef.current.traverse((child) => {
           if (child instanceof THREE.Mesh) {
-            child.geometry?.dispose();
+            if (child.geometry) {
+              child.geometry.dispose();
+            }
+            
             if (Array.isArray(child.material)) {
-              child.material.forEach((material) => material.dispose());
-            } else {
-              child.material?.dispose();
+              child.material.forEach((material) => {
+                if (material.map) material.map.dispose();
+                material.dispose();
+              });
+            } else if (child.material) {
+              if (child.material.map) child.material.map.dispose();
+              child.material.dispose();
             }
           }
         });
+        
         if (sceneRef.current.environment) {
-          (sceneRef.current.environment as any).dispose();
+          sceneRef.current.environment.dispose();
           sceneRef.current.environment = null;
         }
+        
         sceneRef.current.clear();
       }
+      
+      // Dispose of highlight material
+      if (highlightMaterialRef.current) {
+        (highlightMaterialRef.current as THREE.Material).dispose();
+      }
+      
+      // Clear any other references
+      dracoLoader.dispose();
+      targetMeshesRef.current.clear();
+      originalMaterialsRef.current.clear();
       if (modelRef.current) modelRef.current = null;
+      directionalLightRef.current = null;
     };
   }, [modelPath]);
 
@@ -368,8 +581,24 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
             }}
           />
           <p style={{ color: '#333', fontSize: '16px', fontWeight: 'bold' }}>
-            Loading 3D Model...
+            Loading 3D Model... {loadingProgress}%
           </p>
+          <div style={{ 
+            width: '200px', 
+            height: '8px', 
+            backgroundColor: '#e0e0e0', 
+            borderRadius: '4px',
+            overflow: 'hidden',
+            marginTop: '5px'
+          }}>
+            <div style={{ 
+              width: `${loadingProgress}%`, 
+              height: '100%', 
+              backgroundColor: '#3498db',
+              borderRadius: '4px',
+              transition: 'width 0.3s ease-in-out'
+            }} />
+          </div>
           <style>
             {`
               @keyframes spin {
@@ -378,6 +607,23 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/test3.glb' }) 
               }
             `}
           </style>
+        </div>
+      )}
+      
+      {hoveredMeshName && !isLoading && (
+        <div style={{
+          position: 'absolute',
+          top: '20px',
+          left: '20px',
+          padding: '10px 15px',
+          backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          color: 'white',
+          borderRadius: '5px',
+          fontWeight: 'bold',
+          zIndex: 10,
+          pointerEvents: 'none'
+        }}>
+          Selected: Unit {hoveredMeshName}
         </div>
       )}
     </div>
