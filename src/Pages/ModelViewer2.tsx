@@ -144,7 +144,7 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
 
     // Load manager to track loading progress
     const loadManager = new THREE.LoadingManager();
-    loadManager.onProgress = (url, loaded, total) => {
+    loadManager.onProgress = (_, loaded, total) => {
       if (total > 0) {
         const progress = Math.floor((loaded / total) * 100);
         setLoadingProgress(progress);
@@ -242,7 +242,10 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
                     roughness: 0.7,
                     metalness: 0.0
                   });
-                  mesh.material[index] = newMat;
+                  // Fix for TS error - check if mesh.material is an array
+                  if (Array.isArray(mesh.material)) {
+                    mesh.material[index] = newMat;
+                  }
                 }
               });
             } else if ((mesh.material as THREE.MeshBasicMaterial).isMeshBasicMaterial) {
@@ -422,7 +425,9 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
       
       // Highlight the new mesh if there's an intersection
       if (intersects.length > 0) {
-        const mesh = intersects[0].object as THREE.Mesh;
+        const mesh = intersects[0]?.object as THREE.Mesh;
+        if (!mesh) return;
+        
         currentlyHighlightedMesh = mesh;
         
         // Extract the unit number to display
