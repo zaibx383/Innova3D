@@ -24,7 +24,10 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
   const [hoveredMeshName, setHoveredMeshName] = useState<string | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const mouseMoveListenerAttachedRef = useRef<boolean>(false);
-  
+  const lastHighlightChangeRef = useRef<number>(0);
+  const autoRotateRef = useRef<boolean>(true);
+  const userInteractedRef = useRef<boolean>(false);
+
   // Maps to store target meshes and their original materials
   const targetMeshesRef = useRef<Map<string, THREE.Mesh>>(new Map());
   const originalMaterialsRef = useRef<Map<string, THREE.Material | THREE.Material[]>>(new Map());
@@ -73,47 +76,77 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
     // Get all target meshes
     const targetMeshes = Array.from(targetMeshesRef.current.values());
     
+    // Add a small threshold for better stability
+    raycasterRef.current.params.Mesh = { 
+      threshold: 0.01  // Small threshold to stabilize selection
+    };
+    
     // Perform the raycasting
     const intersects = raycasterRef.current.intersectObjects(targetMeshes, false);
     
-    // Reset the currently highlighted mesh if it exists
+    // Implement debouncing for highlight changes to reduce flickering
+    const currentTime = Date.now();
+    const debounceTime = 100; // ms
+    
+    // If no intersections, but we have a highlighted mesh
+    if (intersects.length === 0) {
+      if (currentlyHighlightedMeshRef.current && 
+          (currentTime - lastHighlightChangeRef.current > debounceTime)) {
+        // Reset the currently highlighted mesh
+        const originalMaterial = originalMaterialsRef.current.get(currentlyHighlightedMeshRef.current.uuid);
+        if (originalMaterial) {
+          currentlyHighlightedMeshRef.current.material = originalMaterial;
+        }
+        currentlyHighlightedMeshRef.current = null;
+        setHoveredMeshName(null);
+        lastHighlightChangeRef.current = currentTime;
+      }
+      return;
+    }
+    
+    // Check for undefined intersects[0]
+    const firstIntersect = intersects[0];
+    if (!firstIntersect || !firstIntersect.object) return;
+    
+    const mesh = firstIntersect.object as THREE.Mesh;
+    
+    // If we're already highlighting this mesh, do nothing
+    if (currentlyHighlightedMeshRef.current === mesh) return;
+    
+    // Only change highlight if enough time has passed since last change
+    if (currentTime - lastHighlightChangeRef.current < debounceTime) return;
+    
+    // Reset previous highlight if it exists
     if (currentlyHighlightedMeshRef.current) {
       const originalMaterial = originalMaterialsRef.current.get(currentlyHighlightedMeshRef.current.uuid);
       if (originalMaterial) {
         currentlyHighlightedMeshRef.current.material = originalMaterial;
       }
-      currentlyHighlightedMeshRef.current = null;
-      setHoveredMeshName(null);
     }
     
-    // Highlight the new mesh if there's an intersection
-    if (intersects.length > 0) {
-      // Check for undefined intersects[0]
-      const firstIntersect = intersects[0];
-      if (firstIntersect && firstIntersect.object) {
-        const mesh = firstIntersect.object as THREE.Mesh;
-        currentlyHighlightedMeshRef.current = mesh;
-        
-        // Extract the unit number to display
-        const targetNum = getTargetNumber(mesh.name);
-        if (targetNum !== null) {
-          setHoveredMeshName(targetNum.toString());
-        } else {
-          setHoveredMeshName(mesh.name);
-        }
-        
-        // Apply the highlight material
-        if (highlightMaterialRef.current) {
-          // Store the original material if not already stored
-          if (!originalMaterialsRef.current.has(mesh.uuid)) {
-            originalMaterialsRef.current.set(mesh.uuid, mesh.material);
-          }
-          
-          // Apply highlight material
-          mesh.material = highlightMaterialRef.current;
-        }
-      }
+    // Highlight the new mesh
+    currentlyHighlightedMeshRef.current = mesh;
+    
+    // Extract the unit number to display
+    const targetNum = getTargetNumber(mesh.name);
+    if (targetNum !== null) {
+      setHoveredMeshName(targetNum.toString());
+    } else {
+      setHoveredMeshName(mesh.name);
     }
+    
+    // Apply the highlight material
+    if (highlightMaterialRef.current) {
+      // Store the original material if not already stored
+      if (!originalMaterialsRef.current.has(mesh.uuid)) {
+        originalMaterialsRef.current.set(mesh.uuid, mesh.material);
+      }
+      
+      // Apply highlight material
+      mesh.material = highlightMaterialRef.current;
+    }
+    
+    lastHighlightChangeRef.current = currentTime;
   };
 
   // Setup mouse event handling - moved outside the useEffect for better reuse
@@ -126,19 +159,35 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
       const rect = container.getBoundingClientRect();
       mouseRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       mouseRef.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      
+      // Removed: Don't stop auto-rotation on mouse move
+      // userInteractedRef.current = true;
+      // autoRotateRef.current = false;
     };
     
-    // Add mouse move event listener
+    const onUserInteraction = () => {
+      userInteractedRef.current = true;
+      autoRotateRef.current = false;
+    };
+    
+    // Add mouse move event listener for raycasting only
     container.addEventListener('mousemove', onMouseMove);
+    
+    // These interactions will stop the rotation
+    container.addEventListener('mousedown', onUserInteraction);
+    container.addEventListener('wheel', onUserInteraction);
+    container.addEventListener('touchstart', onUserInteraction);
     mouseMoveListenerAttachedRef.current = true;
     
     // Return cleanup function
     return () => {
       container.removeEventListener('mousemove', onMouseMove);
+      container.removeEventListener('mousedown', onUserInteraction);
+      container.removeEventListener('wheel', onUserInteraction);
+      container.removeEventListener('touchstart', onUserInteraction);
       mouseMoveListenerAttachedRef.current = false;
     };
   };
-
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -148,6 +197,8 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
     originalMaterialsRef.current.clear();
     currentlyHighlightedMeshRef.current = null;
     setHoveredMeshName(null);
+    userInteractedRef.current = false;
+    autoRotateRef.current = true;
 
     // --- Scene Setup ---
     const scene = new THREE.Scene();
@@ -156,7 +207,7 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
 
     // --- Camera Setup ---
     const camera = new THREE.PerspectiveCamera(
-      80,
+      45, // Reduced FOV for better initial view
       container.clientWidth / container.clientHeight,
       0.1,
       1000
@@ -166,14 +217,16 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
 
     // --- Renderer Setup with optimized settings ---
     const renderer = new THREE.WebGLRenderer({
-      antialias: false,
+      antialias: true, // Changed to true to smooth edges
       powerPreference: 'high-performance',
-      precision: 'mediump'
+      precision: 'mediump',
+      alpha: true,  // Enable alpha channel
+      stencil: true // Enable stencil buffer
     });
     rendererRef.current = renderer;
     renderer.setSize(container.clientWidth, container.clientHeight);
     
-    const pixelRatio = Math.min(window.devicePixelRatio, 1.5);
+    const pixelRatio = Math.min(window.devicePixelRatio, 2); 
     renderer.setPixelRatio(pixelRatio);
     
     renderer.shadowMap.enabled = true;
@@ -191,11 +244,19 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
     controls.dampingFactor = 0.05;
     controls.screenSpacePanning = false;
     controls.maxPolarAngle = Math.PI / 2;
-    controls.minDistance = 3.0;
-    controls.maxDistance = 30.0;
+    controls.minDistance = 6.0;
+    // More restricted max distance for zoom out
+    controls.maxDistance = 20.0;
     controls.zoomSpeed = 0.8;
     controls.rotateSpeed = 0.7;
     controls.enableZoom = true;
+    
+    // Add event listeners for interactions
+    controls.addEventListener('start', () => {
+      userInteractedRef.current = true;
+      autoRotateRef.current = false;
+    });
+    
     controls.update();
 
     // --- Lighting Setup ---
@@ -240,8 +301,15 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
       emissiveIntensity: 0.5,
       roughness: 0.5,
       metalness: 0.8,
-      transparent: true,
-      opacity: 0.9
+      transparent: false,      // No transparency
+      opacity: 1.0,            // Full opacity
+      polygonOffset: true,     // Enable polygon offset to prevent z-fighting
+      polygonOffsetFactor: -2, // Increased negative factor to pull further toward camera
+      polygonOffsetUnits: -2,  // Increased offset units
+      side: THREE.FrontSide,   // Only render front faces to avoid flickering
+      depthWrite: true,        // Ensure proper depth writing
+      depthTest: true,         // Keep depth testing enabled
+      clipShadows: true        // Enable shadow clipping to reduce edge artifacts
     });
     
     highlightMaterialRef.current = highlightMaterial;
@@ -259,7 +327,7 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
     
     let introAnimation = true;
     let animationStartTime = 0;
-    const animationDuration = 2000;
+    const animationDuration = 1500; // Shorter animation
 
     // Load manager to track loading progress
     const loadManager = new THREE.LoadingManager();
@@ -283,11 +351,16 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
         const center = new THREE.Vector3();
         box.getCenter(center);
         model.position.sub(center);
+        
+        // Make the model bigger
         const size = box.getSize(new THREE.Vector3()).length();
-        const baseScale = 10 / size;
-        const extraZoom = 1.5;
+        const baseScale = 12 / size; // Increased from 10 to 12
+        const extraZoom = 1.8; // Increased from 1.5 to 1.8
         const scale = baseScale * extraZoom;
         model.scale.set(scale, scale, scale);
+        
+        // Make model face forward initially - no rotation
+        model.rotation.y = 0;
 
         // Clear any previous maps
         targetMeshesRef.current.clear();
@@ -299,6 +372,24 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
             const mesh = child as THREE.Mesh;
             mesh.castShadow = true;
             mesh.receiveShadow = true;
+            
+            // Enable additional options to improve edge rendering
+            mesh.frustumCulled = true;
+            
+            // Apply a small offset to all materials to avoid z-fighting
+            if (Array.isArray(mesh.material)) {
+              mesh.material.forEach((mat) => {
+                if (mat.isMaterial) {
+                  mat.polygonOffset = true;
+                  mat.polygonOffsetFactor = 0.1;
+                  mat.polygonOffsetUnits = 0.1;
+                }
+              });
+            } else if (mesh.material && mesh.material.isMaterial) {
+              mesh.material.polygonOffset = true;
+              mesh.material.polygonOffsetFactor = 0.1;
+              mesh.material.polygonOffsetUnits = 0.1;
+            }
             
             // Check if this is one of our target meshes
             if (isTargetMesh(child.name)) {
@@ -360,17 +451,22 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
         const boundingSphere = new THREE.Sphere();
         boundingBox.getBoundingSphere(boundingSphere);
         controls.target.copy(boundingSphere.center);
+        
+        // Calculate a better radius for a larger model view
         const radius = boundingSphere.radius;
+        
+        // Set better initial camera position for forward-facing view
         camera.position.set(
-          boundingSphere.center.x - radius * 0.6,
-          boundingSphere.center.y + radius * 0.3,
-          boundingSphere.center.z + radius * 0.6
+          boundingSphere.center.x,  // Center X (no offset)
+          boundingSphere.center.y + radius * 0.4, // Slightly above center
+          boundingSphere.center.z + radius * 1.3  // Positioned in front of model
         );
+        
         const initialCameraPosition = camera.position.clone();
         const targetCameraPosition = new THREE.Vector3(
-          boundingSphere.center.x - radius * 0.8,
-          boundingSphere.center.y + radius * 0.5,
-          boundingSphere.center.z + radius * 1.2
+          boundingSphere.center.x,  // Center X
+          boundingSphere.center.y + radius * 0.5, // Slightly higher
+          boundingSphere.center.z + radius * 1.6  // Further in front for better view
         );
 
         if (directionalLightRef.current) {
@@ -407,6 +503,11 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
         setIsLoading(false);
         introAnimation = true;
         animationStartTime = Date.now();
+        
+        // Set initial rotation to 0 to ensure model is facing forward
+        if (model) {
+          model.rotation.y = 0;
+        }
 
         // Animation loop
         const animate = () => {
@@ -418,10 +519,7 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
             const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
             const easedProgress = easeOutCubic(progress);
             
-            if (model) {
-              model.rotation.y = easedProgress * Math.PI * 0.25;
-            }
-            
+            // No rotation during intro animation - just camera movement
             camera.position.lerpVectors(
               initialCameraPosition,
               targetCameraPosition,
@@ -431,9 +529,14 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
             if (progress >= 1) {
               introAnimation = false;
               controls.enabled = true;
+              // Start auto-rotation after intro animation
+              autoRotateRef.current = true;
             } else {
               controls.enabled = false;
             }
+          } else if (model && autoRotateRef.current && !userInteractedRef.current) {
+            // Slow automatic rotation when not interacting
+            model.rotation.y += 0.001; // Very slow rotation
           }
 
           controls.update();
@@ -599,8 +702,8 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
         width: '100%',
         height: '100vh',
         backgroundColor: '#F5F5F5',
-        overflow: 'hidden',
-        position: 'relative'
+        position: 'relative',
+        overflow: 'hidden'
       }}
     >
       <div
@@ -608,10 +711,9 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
         style={{
           width: '100%',
           height: '100%',
-          maxWidth: '1600px',
-          maxHeight: '900px',
-          margin: 'auto',
-          boxShadow: '0 0 20px rgba(0,0,0,0.05)'
+          position: 'absolute',
+          top: 0,
+          left: 0
         }}
       />
       {isLoading && (
@@ -682,7 +784,7 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
           zIndex: 10,
           pointerEvents: 'none'
         }}>
-       
+          Unit {hoveredMeshName}
         </div>
       )}
     </div>
