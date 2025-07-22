@@ -265,10 +265,11 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
     const loadManager = new THREE.LoadingManager();
     loadManager.onProgress = (_, loaded, total) => {
       if (total > 0) {
-        const progress = Math.floor((loaded / total) * 100);
+        const progress = Math.min(Math.floor((loaded / total) * 100), 100);
         setLoadingProgress(progress);
       }
     };
+    
     loader.manager = loadManager;
     
     loader.load(
@@ -452,7 +453,7 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
       },
       (xhr: ProgressEvent<EventTarget>) => {
         if (xhr.total) {
-          const progress = Math.floor((xhr.loaded / xhr.total) * 100);
+          const progress = Math.min(Math.floor((xhr.loaded / xhr.total) * 100), 100);
           setLoadingProgress(progress);
         }
       },
