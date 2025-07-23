@@ -21,7 +21,7 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
   const mouseRef = useRef(new THREE.Vector2());
   const [isLoading, setIsLoading] = useState(true);
   const [loadingProgress, setLoadingProgress] = useState(0);
-  const [hoveredMeshName, setHoveredMeshName] = useState<string | null>(null);
+  const [_hoveredMeshName, setHoveredMeshName] = useState<string | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const mouseMoveListenerAttachedRef = useRef<boolean>(false);
   const lastHighlightChangeRef = useRef<number>(0);
