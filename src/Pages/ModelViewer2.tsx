@@ -27,6 +27,7 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
   const lastHighlightChangeRef = useRef<number>(0);
   const autoRotateRef = useRef<boolean>(true);
   const userInteractedRef = useRef<boolean>(false);
+  const modelCenterRef = useRef<THREE.Vector3 | null>(null);
 
   // Maps to store target meshes and their original materials
   const targetMeshesRef = useRef<Map<string, THREE.Mesh>>(new Map());
@@ -159,10 +160,6 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
       const rect = container.getBoundingClientRect();
       mouseRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       mouseRef.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-      
-      // Removed: Don't stop auto-rotation on mouse move
-      // userInteractedRef.current = true;
-      // autoRotateRef.current = false;
     };
     
     const onUserInteraction = () => {
@@ -188,6 +185,15 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
       mouseMoveListenerAttachedRef.current = false;
     };
   };
+  
+  // Function to recenter the camera target on the model
+  const recenterCamera = () => {
+    if (controlsRef.current && modelCenterRef.current) {
+      controlsRef.current.target.copy(modelCenterRef.current);
+      controlsRef.current.update();
+    }
+  };
+
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -242,19 +248,41 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
     controlsRef.current = controls;
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
-    controls.screenSpacePanning = false;
-    controls.maxPolarAngle = Math.PI / 2;
-    controls.minDistance = 6.0;
+    controls.screenSpacePanning = true; // Enable screen space panning for more natural behavior
+    controls.maxPolarAngle = Math.PI / 2.35;
+    controls.minDistance = 1.25;
     // More restricted max distance for zoom out
     controls.maxDistance = 20.0;
     controls.zoomSpeed = 0.8;
     controls.rotateSpeed = 0.7;
     controls.enableZoom = true;
+    controls.panSpeed = 0.8; // Adjust pan speed for better control
+    
+    // Explicitly set mouse buttons for standard behavior
+    controls.mouseButtons = {
+      LEFT: THREE.MOUSE.ROTATE,
+      MIDDLE: THREE.MOUSE.DOLLY,
+      RIGHT: THREE.MOUSE.PAN
+    };
     
     // Add event listeners for interactions
     controls.addEventListener('start', () => {
       userInteractedRef.current = true;
       autoRotateRef.current = false;
+    });
+    
+    // Add an event listener to adjust target during significant changes
+    controls.addEventListener('end', () => {
+      // Reset rotation center if we're too far from the model
+      if (modelCenterRef.current) {
+        const distanceToModelCenter = camera.position.distanceTo(modelCenterRef.current);
+        const distanceToTarget = camera.position.distanceTo(controls.target);
+        
+        // If we're much closer to the model than to the current target, recenter
+        if (distanceToModelCenter < distanceToTarget * 0.5) {
+          recenterCamera();
+        }
+      }
     });
     
     controls.update();
@@ -350,6 +378,10 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
         const box = new THREE.Box3().setFromObject(model);
         const center = new THREE.Vector3();
         box.getCenter(center);
+        
+        // Store the model center for camera targeting
+        modelCenterRef.current = center.clone();
+        
         model.position.sub(center);
         
         // Make the model bigger
@@ -450,6 +482,8 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
         const boundingBox = new THREE.Box3().setFromObject(model);
         const boundingSphere = new THREE.Sphere();
         boundingBox.getBoundingSphere(boundingSphere);
+        
+        // Important: Set the orbit controls target to the model center
         controls.target.copy(boundingSphere.center);
         
         // Calculate a better radius for a larger model view
@@ -509,6 +543,13 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
           model.rotation.y = 0;
         }
 
+        // Add a double-click event listener to reset camera to model center
+        const handleDoubleClick = () => {
+          recenterCamera();
+        };
+        
+        container.addEventListener('dblclick', handleDoubleClick);
+
         // Animation loop
         const animate = () => {
           animationFrameRef.current = requestAnimationFrame(animate);
@@ -553,6 +594,11 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
         }
 
         animate();
+
+        // Add cleanup for double-click handler
+        return () => {
+          container.removeEventListener('dblclick', handleDoubleClick);
+        };
       },
       (xhr: ProgressEvent<EventTarget>) => {
         if (xhr.total) {
@@ -680,6 +726,7 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
       modelRef.current = null;
       directionalLightRef.current = null;
       cameraRef.current = null;
+      modelCenterRef.current = null;
     };
   }, [modelPath]);
 
@@ -729,40 +776,76 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
             zIndex: 10
           }}
         >
-          <div
-            className="spinner"
-            style={{
-              width: '60px',
-              height: '60px',
-              border: '5px solid rgba(0, 0, 0, 0.1)',
-              borderTop: '5px solid #3498db',
-              borderRadius: '50%',
-              animation: 'spin 1s linear infinite',
-              marginBottom: '15px'
-            }}
-          />
-          <p style={{ color: '#333', fontSize: '16px', fontWeight: 'bold' }}>
+          {/* Custom loading logo based on the reference image */}
+          <div className="custom-loader">
+            <div className="circle-segment segment-1"></div>
+            <div className="circle-segment segment-2"></div>
+            <div className="circle-segment segment-3"></div>
+            <div className="circle-segment segment-4"></div>
+          </div>
+          <p style={{ 
+            color: '#333', 
+            fontSize: '16px', 
+            fontWeight: '500',
+            marginTop: '25px',
+            fontFamily: 'Arial, sans-serif'
+          }}>
             Loading 3D Model... {loadingProgress}%
           </p>
           <div style={{ 
-            width: '200px', 
-            height: '8px', 
+            width: '240px', 
+            height: '6px', 
             backgroundColor: '#e0e0e0', 
-            borderRadius: '4px',
+            borderRadius: '3px',
             overflow: 'hidden',
-            marginTop: '5px'
+            marginTop: '8px'
           }}>
             <div style={{ 
               width: `${loadingProgress}%`, 
               height: '100%', 
-              backgroundColor: '#3498db',
-              borderRadius: '4px',
+              backgroundColor: '#e53935', // Red color matching the logo
+              borderRadius: '3px',
               transition: 'width 0.3s ease-in-out'
             }} />
           </div>
           <style>
             {`
-              @keyframes spin {
+              .custom-loader {
+                position: relative;
+                width: 80px;
+                height: 80px;
+                animation: rotate 2s linear infinite;
+              }
+              
+              .circle-segment {
+                position: absolute;
+                width: 45%;
+                height: 45%;
+                border-radius: 50%;
+                background-color: #e53935; /* Red color */
+              }
+              
+              .segment-1 {
+                top: 0;
+                left: 0;
+              }
+              
+              .segment-2 {
+                top: 0;
+                right: 0;
+              }
+              
+              .segment-3 {
+                bottom: 0;
+                right: 0;
+              }
+              
+              .segment-4 {
+                bottom: 0;
+                left: 0;
+              }
+              
+              @keyframes rotate {
                 0% { transform: rotate(0deg); }
                 100% { transform: rotate(360deg); }
               }
@@ -771,7 +854,7 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
         </div>
       )}
       
-      {hoveredMeshName && !isLoading && (
+      {/* {hoveredMeshName && !isLoading && (
         <div style={{
           position: 'absolute',
           top: '20px',
@@ -785,6 +868,38 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
           pointerEvents: 'none'
         }}>
           Unit {hoveredMeshName}
+        </div>
+      )} */}
+      
+      {!isLoading && (
+        <div style={{
+          position: 'absolute',
+          bottom: '20px',
+          right: '20px', // Changed from left to right
+          padding: '10px 15px',
+          color: '#333333',
+          borderRadius: '5px',
+          fontSize: '13px',
+          fontFamily: 'Arial, sans-serif',
+          fontWeight: '500',
+          zIndex: 10,
+          pointerEvents: 'none',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px' // Space between instructions
+        }}>
+          <span style={{ display: 'flex', alignItems: 'center' }}>
+            <span style={{ fontWeight: 'bold', marginRight: '5px' }}>Left-click:</span> Rotate
+          </span>
+          <span style={{ display: 'flex', alignItems: 'center' }}>
+            <span style={{ fontWeight: 'bold', marginRight: '5px' }}>Right-click:</span> Pan
+          </span>
+          <span style={{ display: 'flex', alignItems: 'center' }}>
+            <span style={{ fontWeight: 'bold', marginRight: '5px' }}>Scroll:</span> Zoom
+          </span>
+          <span style={{ display: 'flex', alignItems: 'center' }}>
+            <span style={{ fontWeight: 'bold', marginRight: '5px' }}>Double-click:</span> Reset View
+          </span>
         </div>
       )}
     </div>
