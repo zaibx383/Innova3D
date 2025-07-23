@@ -28,6 +28,8 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
   const autoRotateRef = useRef<boolean>(true);
   const userInteractedRef = useRef<boolean>(false);
   const modelCenterRef = useRef<THREE.Vector3 | null>(null);
+  const initialCameraPositionRef = useRef<THREE.Vector3 | null>(null);
+  const initialTargetRef = useRef<THREE.Vector3 | null>(null);
 
   // Maps to store target meshes and their original materials
   const targetMeshesRef = useRef<Map<string, THREE.Mesh>>(new Map());
@@ -186,9 +188,63 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
     };
   };
   
-  // Function to recenter the camera target on the model
-  const recenterCamera = () => {
-    if (controlsRef.current && modelCenterRef.current) {
+  // Function to reset the camera and controls to initial position
+  const resetCameraView = () => {
+    if (!controlsRef.current || !cameraRef.current) return;
+    
+    // Reset camera position to initial position (if stored)
+    if (initialCameraPositionRef.current && initialTargetRef.current) {
+      // Smoothly animate to the initial position
+      const controls = controlsRef.current;
+      const camera = cameraRef.current;
+      
+      // Store current position for animation
+      const startPosition = camera.position.clone();
+      const startTarget = controls.target.clone();
+      
+      // Set the target position to the stored initial values
+      const endPosition = initialCameraPositionRef.current.clone();
+      const endTarget = initialTargetRef.current.clone();
+      
+      // Animation parameters
+      const duration = 1000; // ms
+      const startTime = Date.now();
+      
+      // Stop auto-rotation during the animation
+      const wasAutoRotating = autoRotateRef.current;
+      autoRotateRef.current = false;
+      
+      // Define the animation function
+      const animateReset = () => {
+        const now = Date.now();
+        const elapsed = now - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        
+        // Ease function (ease-out cubic)
+        const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
+        const easedProgress = easeOut(progress);
+        
+        // Interpolate position and target
+        camera.position.lerpVectors(startPosition, endPosition, easedProgress);
+        controls.target.lerpVectors(startTarget, endTarget, easedProgress);
+        controls.update();
+        
+        // Continue the animation if not complete
+        if (progress < 1) {
+          requestAnimationFrame(animateReset);
+        } else {
+          // Restore auto-rotation if it was on
+          autoRotateRef.current = wasAutoRotating;
+        }
+      };
+      
+      // Start the animation
+      animateReset();
+      
+      // Notify that user has interacted
+      userInteractedRef.current = true;
+    } else if (modelCenterRef.current) {
+      // Fallback if no initial position is stored
       controlsRef.current.target.copy(modelCenterRef.current);
       controlsRef.current.update();
     }
@@ -280,7 +336,8 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
         
         // If we're much closer to the model than to the current target, recenter
         if (distanceToModelCenter < distanceToTarget * 0.5) {
-          recenterCamera();
+          controls.target.copy(modelCenterRef.current);
+          controls.update();
         }
       }
     });
@@ -497,11 +554,16 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
         );
         
         const initialCameraPosition = camera.position.clone();
+        initialCameraPositionRef.current = initialCameraPosition.clone();
+        
         const targetCameraPosition = new THREE.Vector3(
           boundingSphere.center.x,  // Center X
           boundingSphere.center.y + radius * 0.5, // Slightly higher
           boundingSphere.center.z + radius * 1.6  // Further in front for better view
         );
+        
+        // Store the initial target for reset functionality
+        initialTargetRef.current = boundingSphere.center.clone();
 
         if (directionalLightRef.current) {
           const light = directionalLightRef.current;
@@ -545,7 +607,7 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
 
         // Add a double-click event listener to reset camera to model center
         const handleDoubleClick = () => {
-          recenterCamera();
+          resetCameraView();
         };
         
         container.addEventListener('dblclick', handleDoubleClick);
@@ -570,6 +632,8 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
             if (progress >= 1) {
               introAnimation = false;
               controls.enabled = true;
+              // Store the final camera position after intro animation for reset
+              initialCameraPositionRef.current = camera.position.clone();
               // Start auto-rotation after intro animation
               autoRotateRef.current = true;
             } else {
@@ -727,6 +791,8 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
       directionalLightRef.current = null;
       cameraRef.current = null;
       modelCenterRef.current = null;
+      initialCameraPositionRef.current = null;
+      initialTargetRef.current = null;
     };
   }, [modelPath]);
 
