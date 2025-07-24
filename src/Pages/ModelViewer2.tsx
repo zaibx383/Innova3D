@@ -250,6 +250,164 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
     }
   };
 
+  // NEW FUNCTION: Smart target adjustment based on camera position and raycasting
+  const updateControlTargetBasedOnView = () => {
+    if (!cameraRef.current || !controlsRef.current || !sceneRef.current) return;
+    
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    
+    // Create direction vector pointing forward from camera
+    const direction = new THREE.Vector3(0, 0, -1);
+    direction.applyQuaternion(camera.quaternion);
+    
+    // Create a raycaster for detecting objects in view
+    const raycaster = new THREE.Raycaster(camera.position, direction);
+    
+    // Get all meshes from the scene for raycasting
+    const meshes: THREE.Mesh[] = [];
+    sceneRef.current.traverse((object) => {
+      if ((object as THREE.Mesh).isMesh) {
+        meshes.push(object as THREE.Mesh);
+      }
+    });
+    
+    // Cast ray to find what's in front of the camera
+    const intersects = raycaster.intersectObjects(meshes, false);
+    
+    if (intersects.length > 0) {
+      // Get the closest intersection
+      const intersection = intersects[0];
+      
+      // Calculate an ideal target based on distance to intersection
+      // If close to a wall/object, set target closer to camera
+      const distanceToObject = intersection.distance;
+      
+      // Calculate current distance from camera to target
+      const distanceToTarget = camera.position.distanceTo(controls.target);
+      
+      // Get distance from camera to model center for reference
+      let distanceToModelCenter = 10; // Default fallback
+      if (modelCenterRef.current) {
+        distanceToModelCenter = camera.position.distanceTo(modelCenterRef.current);
+      }
+      
+      // Get model size for reference
+      let modelSize = 10; // Default fallback
+      if (modelRef.current) {
+        const box = new THREE.Box3().setFromObject(modelRef.current);
+        const size = box.getSize(new THREE.Vector3());
+        modelSize = Math.max(size.x, size.y, size.z);
+      }
+      
+      // Adaptive radius calculation based on current view context
+      // When we're zoomed in (close to objects), we use a smaller rotation radius
+      const closeToWall = distanceToObject < 1.5; // Detect when very close to a wall
+      
+      if (closeToWall || distanceToObject < distanceToTarget * 0.6) {
+        // We're close to an object, adjust target to be closer to camera
+        const newTargetDistance = Math.min(distanceToObject * 0.7, distanceToTarget);
+        
+        // Create new target point at this distance in front of camera
+        const newTarget = camera.position.clone().add(
+          direction.clone().multiplyScalar(newTargetDistance)
+        );
+        
+        // Determine damping factor based on proximity to wall
+        let dampingFactor = 0.05; // Default
+        if (closeToWall) {
+          // Very slow/laggy target movement when close to walls
+          dampingFactor = 0.03;
+        }
+        
+        // Smoothly move the target (with damping to create lag)
+        controls.target.lerp(newTarget, dampingFactor);
+        controls.update();
+      } 
+      // If we're very far from everything, reset to model center
+      else if (distanceToObject > distanceToModelCenter * 1.5) {
+        if (modelCenterRef.current) {
+          controls.target.lerp(modelCenterRef.current, 0.03); // Slower lerp for more lag
+          controls.update();
+        }
+      }
+    }
+  };
+
+  // NEW FUNCTION: Dynamic zoom behavior adjustments based on camera position
+
+  
+  const adjustControlsBasedOnZoomLevel = () => {
+    if (!cameraRef.current || !controlsRef.current || !modelCenterRef.current) return;
+    
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    const modelCenter = modelCenterRef.current;
+    
+    // Calculate distances
+    const distanceToModel = camera.position.distanceTo(modelCenter);
+    const distanceToTarget = camera.position.distanceTo(controls.target);
+    
+    // Get the model bounding box for reference
+    let modelSize = 10; // Default fallback
+    if (modelRef.current) {
+      const box = new THREE.Box3().setFromObject(modelRef.current);
+      const size = box.getSize(new THREE.Vector3());
+      modelSize = Math.max(size.x, size.y, size.z);
+    }
+    
+    // Define zoom level thresholds relative to model size
+    const farZoomThreshold = modelSize * 0.8;
+    const midZoomThreshold = modelSize * 0.4;
+    const closeZoomThreshold = modelSize * 0.2;
+    const veryCloseZoomThreshold = modelSize * 0.1;
+    
+    // Adjust controls based on distance from model center
+    if (distanceToModel > farZoomThreshold) {
+      // Far zoom - default behavior
+      controls.rotateSpeed = 0.7;
+      controls.dampingFactor = 0.05;
+      controls.panSpeed = 0.8;
+    } 
+    else if (distanceToModel > midZoomThreshold) {
+      // Medium distance - slightly more responsive
+      controls.rotateSpeed = 0.65;
+      controls.dampingFactor = 0.07;
+      controls.panSpeed = 0.7;
+    }
+    else if (distanceToModel > closeZoomThreshold) {
+      // Closer zoom - more precision
+      controls.rotateSpeed = 0.55;
+      controls.dampingFactor = 0.12; // Increased damping
+      controls.panSpeed = 0.6;
+    }
+    else if (distanceToModel > veryCloseZoomThreshold) {
+      // Very close zoom - high precision with significant lag
+      controls.rotateSpeed = 0.4; // Reduced from 0.45
+      controls.dampingFactor = 0.25; // Increased from 0.15
+      controls.panSpeed = 0.4;
+    }
+    else {
+      // Extremely close (inside rooms) - maximum precision with heavy lag
+      controls.rotateSpeed = 0.3; // Reduced from 0.35
+      controls.dampingFactor = 0.35; // Increased from 0.2
+      controls.panSpeed = 0.25; // Reduced from 0.3
+    }
+    
+    // IMPORTANT: Dynamic target adjustment for close-up views
+    // If we're very close to our current target, adjust target point to be closer to camera
+    if (distanceToTarget < closeZoomThreshold * 0.3) {
+      // When very close, create a target point that's in front of camera
+      // This enables "first person" style navigation when inside rooms
+      const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+      const newTargetDistance = Math.max(distanceToTarget, 0.6); // Increased minimum distance
+      const newTarget = camera.position.clone().add(direction.multiplyScalar(newTargetDistance));
+      
+      // Apply with heavier damping to increase lag/resistance feel
+      controls.target.lerp(newTarget, 0.06); // Reduced from 0.1 for more lag
+    }
+  };
+
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -306,7 +464,7 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
     controls.dampingFactor = 0.05;
     controls.screenSpacePanning = true; // Enable screen space panning for more natural behavior
     controls.maxPolarAngle = Math.PI / 2.35;
-    controls.minDistance = 1.25;
+    controls.minDistance = 0.5; // Reduced from 1.25 to allow closer inspection
     // More restricted max distance for zoom out
     controls.maxDistance = 20.0;
     controls.zoomSpeed = 0.8;
@@ -339,6 +497,15 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
           controls.target.copy(modelCenterRef.current);
           controls.update();
         }
+      }
+    });
+    
+    // NEW: Add event listener for zoom changes to update control behavior
+    controls.addEventListener('change', () => {
+      // This is called whenever the camera moves or controls change
+      // We'll use it to update our dynamic control behavior
+      if (cameraRef.current && controlsRef.current) {
+        adjustControlsBasedOnZoomLevel();
       }
     });
     
@@ -644,6 +811,17 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
             model.rotation.y += 0.001; // Very slow rotation
           }
 
+          // Apply dynamic control adaptations based on zoom level
+          if (!introAnimation) {
+            adjustControlsBasedOnZoomLevel();
+            
+            // Update target less frequently for a more stable, laggy feel
+            // Reduced from 0.05 (5%) to 0.02 (2%) for less frequent updates
+            if (Math.random() < 0.02) {
+              updateControlTargetBasedOnView();
+            }
+          }
+
           controls.update();
           
           // Perform raycasting on each frame to update highlighted mesh
@@ -919,23 +1097,6 @@ const ModelViewer: FC<ModelViewerProps> = ({ modelPath = '/assets/Mezz.glb' }) =
           </style>
         </div>
       )}
-      
-      {/* {hoveredMeshName && !isLoading && (
-        <div style={{
-          position: 'absolute',
-          top: '20px',
-          left: '20px',
-          padding: '10px 15px',
-          backgroundColor: 'rgba(0, 0, 0, 0.7)',
-          color: 'white',
-          borderRadius: '5px',
-          fontWeight: 'bold',
-          zIndex: 10,
-          pointerEvents: 'none'
-        }}>
-          Unit {hoveredMeshName}
-        </div>
-      )} */}
       
       {!isLoading && (
         <div style={{
