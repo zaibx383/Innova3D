@@ -4,15 +4,15 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader, GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
-import image1 from "../assets/img-1.png";
-import image2 from "../assets/img-2.png";
+import image1 from "../assets/image_new.png";
+import image2 from "../assets/image_new.png";
 import { PMREMGenerator } from 'three';
 
 interface ModelViewerProps {
   initialModelPath?: string;
 }
 
-const ModelViewer: FC<ModelViewerProps> = ({ initialModelPath = '/assets/Mezzanine_updated.glb' }) => {
+const ModelViewer: FC<ModelViewerProps> = ({ initialModelPath = '/assets/Mezzanine_new_estate.glb' }) => {
   const navigate = useNavigate();
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -591,7 +591,7 @@ useEffect(() => {
       0.1,
       1000
     );
-    camera.position.set(5, 8, 15);
+    camera.position.set(5, 11, 15);
     cameraRef.current = camera;
   } else {
     cameraRef.current.aspect = container.clientWidth / container.clientHeight;
@@ -694,7 +694,7 @@ useEffect(() => {
       }
     }
     
-    const effectiveMinY = isSmallModel ? 20 : -17.65;
+    const effectiveMinY = isSmallModel ? 20 : -18.45;
     
     if (target.y < effectiveMinY) {
       target.y = effectiveMinY;
@@ -1335,7 +1335,7 @@ useEffect(() => {
           gap: '15px'
         }}>
           <button
-             onClick={() => changeModel('/assets/Mezzanine_updated.glb', 'withMezzanine', 'with')}
+             onClick={() => changeModel('/assets/Mezzanine_new_estate.glb', 'withMezzanine', 'with')}
             style={{
               padding: 0,
               cursor: 'pointer',
@@ -1373,7 +1373,7 @@ useEffect(() => {
           </button>
           
           <button
-            onClick={() => changeModel('/assets/Without_mezzanine_updated.glb', 'withoutMezzanine', 'without')}
+            onClick={() => changeModel('/assets/Without_Mezzanine_new_estate.glb', 'withoutMezzanine', 'without')}
             style={{
               padding: 0,
               cursor: 'pointer',
