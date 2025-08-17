@@ -563,10 +563,8 @@ useEffect(() => {
   userInteractedRef.current = false;
   autoRotateRef.current = true;
   
-  // Reset hover checking - disable it until user interaction
   enableHoverCheckingRef.current = false;
 
-  // Create a scene if it doesn't exist
   if (!sceneRef.current) {
     const scene = new THREE.Scene();
     sceneRef.current = scene;
