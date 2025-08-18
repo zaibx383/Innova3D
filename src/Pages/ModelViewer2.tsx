@@ -1371,7 +1371,7 @@ useEffect(() => {
           </button>
           
           <button
-            onClick={() => changeModel('/assets/Without_Mezzanine_new_estate.glb', 'withoutMezzanine', 'without')}
+            onClick={() => changeModel('/assets/Without_Mezzanine_estate.glb', 'withoutMezzanine', 'without')}
             style={{
               padding: 0,
               cursor: 'pointer',
