@@ -12,7 +12,7 @@ interface ModelViewerProps {
   initialModelPath?: string;
 }
 
-const ModelViewer: FC<ModelViewerProps> = ({ initialModelPath = '/assets/Mezzanine_new_estate.glb' }) => {
+const ModelViewer: FC<ModelViewerProps> = ({ initialModelPath = '/assets/Mezzanine_updated.glb' }) => {
   const navigate = useNavigate();
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -1333,7 +1333,7 @@ useEffect(() => {
           gap: '15px'
         }}>
           <button
-             onClick={() => changeModel('/assets/Mezzanine_new_estate.glb', 'withMezzanine', 'with')}
+             onClick={() => changeModel('/assets/Mezzanine_updated.glb', 'withMezzanine', 'with')}
             style={{
               padding: 0,
               cursor: 'pointer',
